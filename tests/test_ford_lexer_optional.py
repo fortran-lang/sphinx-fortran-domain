@@ -16,7 +16,7 @@ def test_ford_lexer_parses_examples_without_crashing() -> None:
     files = sorted(str(p) for p in example_dir.glob("*.f90"))
 
     lexer = FORDFortranLexer()
-    result = lexer.parse(files, doc_markers=["!>", "!!"])
+    result = lexer.parse(files, doc_markers=["!", ">"])
 
     # Sanity checks: these should exist in the examples.
     assert "example_module" in result.modules

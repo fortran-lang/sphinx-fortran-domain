@@ -11,7 +11,7 @@ def test_regex_lexer_parses_examples() -> None:
     files = sorted(str(p) for p in example_dir.glob("*.f90"))
 
     lexer = RegexFortranLexer()
-    result = lexer.parse(files, doc_markers=["!>", "!!"])
+    result = lexer.parse(files, doc_markers=["!", ">"])
 
     assert "example_module" in result.modules
     assert "math_utils" in result.modules
