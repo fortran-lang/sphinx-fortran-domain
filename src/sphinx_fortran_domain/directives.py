@@ -4,18 +4,10 @@ import re
 
 from docutils import nodes
 from docutils.parsers.rst import Directive
-from docutils.statemachine import ViewList
+from docutils.statemachine import StringList
 from sphinx import addnodes
 from sphinx.directives import ObjectDescription
-from sphinx.util.nodes import nested_parse_with_titles
-
-
-def _split_sig_name(sig: str) -> str:
-	# small helper: "foo(a,b)" -> "foo"
-	head = sig.strip()
-	if "(" in head:
-		head = head.split("(", 1)[0]
-	return head.strip()
+from sphinx.util.parsing import nested_parse_to_nodes
 
 def _make_object_id(objtype: str, fullname: str) -> str:
     # ``nodes.make_id`` produces a valid HTML id fragment.
@@ -27,12 +19,22 @@ def _append_doc(section: nodes.Element, doc: str | None, state) -> None:
 		return
 
 	text = str(doc)
-	view = ViewList()
-	for i, line in enumerate(text.splitlines()):
-		view.append(line, "<fortran-doc>", i + 1)
+	content = StringList(text.splitlines(), source="<fortran-doc>")
+	# Always render docstrings inside a description container.
+	container: nodes.Element = nodes.description()
 
 	# Parse doc as a reST fragment so Sphinx roles/directives work (e.g. .. math::).
-	nested_parse_with_titles(state, view, section)
+	for n in nested_parse_to_nodes(
+		state,
+		content,
+		source="<fortran-doc>",
+		offset=0,
+		allow_section_headings=True,
+		keep_title_context=True,
+		):
+		container += n
+
+	section += container
 
 
 def _append_argument_docs(section: nodes.Element, args, state) -> None:
