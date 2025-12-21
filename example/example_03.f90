@@ -26,8 +26,7 @@ module math_utilities
     
     !> 3x3 matrix type for linear algebra operations
     type :: matrix_type
-        !> Matrix elements stored in column-major order
-        real :: elements(3,3) = 0.0
+        real :: elements(3,3) = 0.0 !> Matrix elements stored in column-major order
     contains
         procedure :: determinant => matrix_determinant
         procedure :: inverse => matrix_inverse

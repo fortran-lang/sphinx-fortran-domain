@@ -33,3 +33,19 @@ def test_ford_lexer_parses_examples_without_crashing() -> None:
     # FORD may provide a full declaration; ensure we capture something useful when present.
     assert arg_a.decl
     assert "intent" in arg_a.decl.lower()
+
+    # Derived type members and type-bound procedures
+    example_module = result.modules["example_module"]
+    t_vec = next((t for t in example_module.types if t.name == "vector_type"), None)
+    assert t_vec is not None
+    comps = list(getattr(t_vec, "components", []) or [])
+    assert {c.name for c in comps} >= {"x", "y", "z"}
+    cx = next((c for c in comps if c.name == "x"), None)
+    assert cx is not None
+    assert cx.doc and "x component" in cx.doc.lower()
+
+    bps = list(getattr(t_vec, "bound_procedures", []) or [])
+    assert {b.name for b in bps} >= {"magnitude", "dot"}
+    mag = next((b for b in bps if b.name == "magnitude"), None)
+    assert mag is not None
+    assert (mag.target or "").lower().endswith("vector_magnitude")

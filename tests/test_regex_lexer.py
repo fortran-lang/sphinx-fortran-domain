@@ -19,7 +19,23 @@ def test_regex_lexer_parses_examples() -> None:
     assert "stdlib_quadrature_trapz" in result.submodules
 
     m = result.modules["example_module"]
-    assert any(t.name == "vector_type" for t in m.types)
+    t_vec = next((t for t in m.types if t.name == "vector_type"), None)
+    assert t_vec is not None
+
+    # Derived type members (components)
+    comps = list(getattr(t_vec, "components", []) or [])
+    assert {c.name for c in comps} >= {"x", "y", "z"}
+    cx = next((c for c in comps if c.name == "x"), None)
+    assert cx is not None
+    assert cx.doc and "x component" in cx.doc.lower()
+
+    # Type-bound procedures (methods)
+    bps = list(getattr(t_vec, "bound_procedures", []) or [])
+    assert {b.name for b in bps} >= {"magnitude", "dot"}
+    mag = next((b for b in bps if b.name == "magnitude"), None)
+    assert mag is not None
+    assert (mag.target or "").lower().endswith("vector_magnitude")
+
     assert any(p.name == "add_vectors" and p.kind == "function" for p in m.procedures)
     assert any(p.name == "normalize_vector" and p.kind == "subroutine" for p in m.procedures)
 

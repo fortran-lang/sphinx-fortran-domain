@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from docutils import nodes
 from docutils.parsers.rst import Directive
 from docutils.statemachine import ViewList
@@ -57,6 +59,74 @@ def _append_argument_docs(section: nodes.Element, args, state) -> None:
 		section += line
 		if doc:
 			_append_doc(section, str(doc), state)
+
+
+def _append_component_docs(section: nodes.Element, components, state) -> None:
+	if not components:
+		return
+	rows = []
+	for c in components:
+		name = getattr(c, "name", "")
+		decl = getattr(c, "decl", None) or ""
+		doc = getattr(c, "doc", None)
+		if not name:
+			continue
+		rows.append((name, decl, doc))
+	if not rows:
+		return
+
+	section += nodes.subtitle(text="Members")
+	for name, decl, doc in rows:
+		line = nodes.paragraph()
+		line += nodes.strong(text=f"{name}:")
+		if decl:
+			line += nodes.Text(" ")
+			line += nodes.literal(text=str(decl))
+		section += line
+		if doc:
+			_append_doc(section, str(doc), state)
+
+
+def _find_proc_by_name(procedures, name: str):
+	for p in procedures or []:
+		if getattr(p, "name", None) == name:
+			return p
+	return None
+
+
+def _append_type_bound_procedures(section: nodes.Element, bindings, all_procedures, state) -> None:
+	if not bindings:
+		return
+
+	section += nodes.subtitle(text="Procedures")
+	items = nodes.bullet_list()
+	for b in bindings:
+		bname = getattr(b, "name", "")
+		target = getattr(b, "target", None) or bname
+		if not bname:
+			continue
+
+		proc = _find_proc_by_name(all_procedures, target)
+		kind = getattr(proc, "kind", None) if proc is not None else None
+
+		para = nodes.paragraph()
+		if proc is not None and kind in {"function", "subroutine"}:
+			xref = addnodes.pending_xref(
+				"",
+				refdomain="f",
+				reftype=str(kind),
+				reftarget=str(target),
+				refexplicit=True,
+			)
+			xref += nodes.literal(text=str(bname))
+			para += xref
+		else:
+			para += nodes.literal(text=str(bname))
+
+		item = nodes.list_item("", para)
+		items += item
+
+	section += items
 
 class FortranObject(ObjectDescription[str]):
     """Base directive for Fortran objects (manual declarations)."""
@@ -145,6 +215,21 @@ class FortranModule(Directive):
 
 		_append_doc(section, getattr(module, "doc", None), self.state)
 
+		if getattr(module, "types", None):
+			section += nodes.subtitle(text="Types")
+			for t in module.types:
+				fullname = f"{modname}.{t.name}"
+				obj_anchor = _make_object_id("type", fullname)
+				getattr(domain, "note_object")(name=t.name, objtype="type", anchor=obj_anchor)
+				index["entries"].append(("single", f"{t.name} (type)", obj_anchor, "", None))
+
+				sub = nodes.section(ids=[obj_anchor])
+				sub += nodes.title(text=f"Type {t.name}")
+				_append_doc(sub, getattr(t, "doc", None), self.state)
+				_append_component_docs(sub, getattr(t, "components", None), self.state)
+				_append_type_bound_procedures(sub, getattr(t, "bound_procedures", None), getattr(module, "procedures", None), self.state)
+				section += sub
+
 		if getattr(module, "procedures", None):
 			section += nodes.subtitle(text="Procedures")
 			for p in module.procedures:
@@ -161,19 +246,6 @@ class FortranModule(Directive):
 					sub += nodes.literal_block(text=str(sig))
 				_append_doc(sub, getattr(p, "doc", None), self.state)
 				_append_argument_docs(sub, getattr(p, "arguments", None), self.state)
-				section += sub
-
-		if getattr(module, "types", None):
-			section += nodes.subtitle(text="Types")
-			for t in module.types:
-				fullname = f"{modname}.{t.name}"
-				obj_anchor = _make_object_id("type", fullname)
-				getattr(domain, "note_object")(name=t.name, objtype="type", anchor=obj_anchor)
-				index["entries"].append(("single", f"{t.name} (type)", obj_anchor, "", None))
-
-				sub = nodes.section(ids=[obj_anchor])
-				sub += nodes.title(text=f"Type {t.name}")
-				_append_doc(sub, getattr(t, "doc", None), self.state)
 				section += sub
 
 		if getattr(module, "interfaces", None):
@@ -211,6 +283,21 @@ class FortranSubmodule(Directive):
 
 		_append_doc(section, getattr(submodule, "doc", None), self.state)
 
+		if getattr(submodule, "types", None):
+			section += nodes.subtitle(text="Types")
+			for t in submodule.types:
+				fullname = f"{submodname}.{t.name}"
+				obj_anchor = _make_object_id("type", fullname)
+				getattr(domain, "note_object")(name=t.name, objtype="type", anchor=obj_anchor)
+				index["entries"].append(("single", f"{t.name} (type)", obj_anchor, "", None))
+
+				sub = nodes.section(ids=[obj_anchor])
+				sub += nodes.title(text=f"Type {t.name}")
+				_append_doc(sub, getattr(t, "doc", None), self.state)
+				_append_component_docs(sub, getattr(t, "components", None), self.state)
+				_append_type_bound_procedures(sub, getattr(t, "bound_procedures", None), getattr(submodule, "procedures", None), self.state)
+				section += sub
+
 		if getattr(submodule, "procedures", None):
 			section += nodes.subtitle(text="Procedures")
 			for p in submodule.procedures:
@@ -227,19 +314,6 @@ class FortranSubmodule(Directive):
 					sub += nodes.literal_block(text=str(sig))
 				_append_doc(sub, getattr(p, "doc", None), self.state)
 				_append_argument_docs(sub, getattr(p, "arguments", None), self.state)
-				section += sub
-
-		if getattr(submodule, "types", None):
-			section += nodes.subtitle(text="Types")
-			for t in submodule.types:
-				fullname = f"{submodname}.{t.name}"
-				obj_anchor = _make_object_id("type", fullname)
-				getattr(domain, "note_object")(name=t.name, objtype="type", anchor=obj_anchor)
-				index["entries"].append(("single", f"{t.name} (type)", obj_anchor, "", None))
-
-				sub = nodes.section(ids=[obj_anchor])
-				sub += nodes.title(text=f"Type {t.name}")
-				_append_doc(sub, getattr(t, "doc", None), self.state)
 				section += sub
 
 		if getattr(submodule, "interfaces", None):

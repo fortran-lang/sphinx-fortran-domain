@@ -30,9 +30,31 @@ class FortranProcedure:
 
 
 @dataclass(frozen=True)
+class FortranComponent:
+	"""A derived-type component (field/member)."""
+
+	name: str
+	decl: str | None = None  # e.g. "real" or "real, dimension(3,3)"
+	doc: str | None = None
+	location: SourceLocation | None = None
+
+
+@dataclass(frozen=True)
+class FortranTypeBoundProcedure:
+	"""A type-bound procedure binding (method)."""
+
+	name: str  # binding name as used in code: `x%name()`
+	target: str | None = None  # concrete procedure name, if known
+	doc: str | None = None
+	location: SourceLocation | None = None
+
+
+@dataclass(frozen=True)
 class FortranType:
 	name: str
 	doc: str | None = None
+	components: Sequence[FortranComponent] = field(default_factory=list)
+	bound_procedures: Sequence[FortranTypeBoundProcedure] = field(default_factory=list)
 	location: SourceLocation | None = None
 
 

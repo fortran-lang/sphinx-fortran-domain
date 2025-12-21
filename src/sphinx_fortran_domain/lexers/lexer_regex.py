@@ -6,6 +6,7 @@ from typing import Dict, List, Optional, Sequence
 
 from sphinx_fortran_domain.lexers import (
 	FortranArgument,
+	FortranComponent,
 	FortranInterface,
 	FortranLexer,
 	FortranModuleInfo,
@@ -14,6 +15,7 @@ from sphinx_fortran_domain.lexers import (
 	FortranProgramInfo,
 	FortranSubmoduleInfo,
 	FortranType,
+	FortranTypeBoundProcedure,
 	SourceLocation,
 )
 
@@ -27,7 +29,17 @@ _RE_END_SUBMODULE = re.compile(r"^\s*end\s*submodule\b", re.IGNORECASE)
 _RE_PROGRAM = re.compile(r"^\s*program\s+([A-Za-z_]\w*)\b", re.IGNORECASE)
 _RE_END_PROGRAM = re.compile(r"^\s*end\s*program\b", re.IGNORECASE)
 _RE_CONTAINS = re.compile(r"^\s*contains\b", re.IGNORECASE)
-_RE_TYPE_DEF = re.compile(r"^\s*type\b(?P<attrs>[^!]*)::\s*(?P<name>[A-Za-z_]\w*)\b", re.IGNORECASE)
+# Derived type definition: `type [,...] :: name`.
+# Avoid matching declarations like `type(foo) :: var` (note the parentheses).
+_RE_TYPE_DEF = re.compile(
+	r"^\s*type\b(?!\s*\()(?P<attrs>[^!]*)::\s*(?P<name>[A-Za-z_]\w*)\b",
+	re.IGNORECASE,
+)
+_RE_END_TYPE = re.compile(r"^\s*end\s*type\b", re.IGNORECASE)
+_RE_TYPE_PROC_BIND = re.compile(
+	r"^\s*procedure\b(?P<attrs>[^!]*)::\s*(?P<name>[A-Za-z_]\w*)\b(?:\s*=>\s*(?P<target>[A-Za-z_]\w*)\b)?",
+	re.IGNORECASE,
+)
 _RE_END_PROC = re.compile(r"^\s*end\s*(subroutine|function)\b", re.IGNORECASE)
 _RE_RESULT = re.compile(r"\bresult\s*\(\s*([A-Za-z_]\w*)\s*\)", re.IGNORECASE)
 
@@ -124,6 +136,10 @@ def _find_inline_doc(line: str, doc_markers: Sequence[str]) -> Optional[tuple[in
 	for m in doc_markers:
 		if not m:
 			continue
+		# Inline docs live in Fortran comments (introduced by '!').
+		# Ignore markers that don't include '!' so we don't mis-detect operators like `=>`.
+		if "!" not in m:
+			continue
 		pos = line.find(m)
 		if pos == -1:
 			continue
@@ -193,6 +209,7 @@ class RegexFortranLexer(FortranLexer):
 		in_header_doc_phase = False
 
 		current_proc: Optional[dict] = None
+		current_type: Optional[dict] = None
 
 		def flush_doc() -> Optional[str]:
 			nonlocal pending_doc
@@ -239,6 +256,10 @@ class RegexFortranLexer(FortranLexer):
 					# Procedure-level doc (immediately after signature).
 					current_proc["proc_doc_lines"].append(doc_text)
 					continue
+				if current_type is not None:
+					# Doc inside a derived type applies to the next component/binding.
+					add_to_pending(doc_text)
+					continue
 				if in_header_doc_phase:
 					if scope_kind == "module":
 						add_module_doc_line(doc_text)
@@ -254,6 +275,8 @@ class RegexFortranLexer(FortranLexer):
 				# Keep doc blocks intact through blank lines.
 				if current_proc is not None and current_proc.get("in_proc_doc_phase"):
 					current_proc["proc_doc_lines"].append("")
+				elif current_type is not None and pending_doc:
+					pending_doc.append("")
 				elif pending_doc:
 					pending_doc.append("")
 				continue
@@ -263,6 +286,114 @@ class RegexFortranLexer(FortranLexer):
 			if current_proc is not None and current_proc.get("in_proc_doc_phase"):
 				# First non-doc, non-blank line ends the procedure-doc phase.
 				current_proc["in_proc_doc_phase"] = False
+
+			if current_type is not None:
+				# We are inside a derived type definition.
+				if _RE_END_TYPE.match(line):
+					entry = FortranType(
+						name=current_type["name"],
+						doc=current_type.get("doc"),
+						components=tuple(current_type.get("components", [])),
+						bound_procedures=tuple(current_type.get("bound_procedures", [])),
+						location=current_type.get("location"),
+					)
+					if current_type["container_kind"] == "module":
+						container = modules.get(current_type["container_name"])  # type: ignore[arg-type]
+						if container:
+							modules[current_type["container_name"]] = FortranModuleInfo(
+								name=container.name,
+								doc=container.doc,
+								procedures=container.procedures,
+								types=[*container.types, entry],
+								interfaces=container.interfaces,
+								location=container.location,
+							)
+					elif current_type["container_kind"] == "submodule":
+						container = submodules.get(current_type["container_name"])  # type: ignore[arg-type]
+						if container:
+							submodules[current_type["container_name"]] = FortranSubmoduleInfo(
+								name=container.name,
+								parent=container.parent,
+								doc=container.doc,
+								procedures=container.procedures,
+								types=[*container.types, entry],
+								interfaces=container.interfaces,
+								location=container.location,
+							)
+
+					current_type = None
+					pending_doc = []
+					continue
+
+				if _RE_CONTAINS.match(line):
+					current_type["in_type_contains"] = True
+					pending_doc = []
+					continue
+
+				# Type-bound procedure bindings
+				if current_type.get("in_type_contains"):
+					inline = _find_inline_doc(line, doc_markers)
+					doc_inline: Optional[str] = None
+					code_part = line
+					if inline is not None:
+						pos, marker = inline
+						code_part = line[:pos].rstrip()
+						doc_inline = line[pos + len(marker) :].strip() or None
+						pending_doc = []
+
+					m = _RE_TYPE_PROC_BIND.match(code_part)
+					if m:
+						name = m.group("name")
+						target = m.group("target") or name
+						doc = flush_doc()
+						if doc_inline:
+							doc = f"{doc}\n{doc_inline}".strip() if doc else doc_inline
+						current_type["bound_procedures"].append(
+							FortranTypeBoundProcedure(
+								name=name,
+								target=target,
+								doc=doc,
+								location=SourceLocation(path=path, lineno=idx),
+							)
+						)
+						continue
+
+				# Components (member declarations) before type CONTAINS.
+				inline = _find_inline_doc(line, doc_markers)
+				doc_inline = None
+				code_part = line
+				if inline is not None:
+					pos, marker = inline
+					code_part = line[:pos].rstrip()
+					doc_inline = line[pos + len(marker) :].strip() or None
+					pending_doc = []
+
+				# Skip non-declaration statements.
+				low = _strip_inline_comment(code_part).strip().lower()
+				if low.startswith(("procedure", "generic", "final", "private", "public", "type")):
+					pending_doc = []
+					continue
+
+				names = _declared_names_from_declaration(code_part)
+				decl = _decl_from_declaration(code_part)
+				if names and decl:
+					doc = flush_doc()
+					if doc_inline:
+						doc = f"{doc}\n{doc_inline}".strip() if doc else doc_inline
+					for n in names:
+						current_type["components"].append(
+							FortranComponent(
+								name=n,
+								decl=decl,
+								doc=doc,
+								location=SourceLocation(path=path, lineno=idx),
+							)
+						)
+					continue
+
+				# Anything else inside a type breaks a pending-doc chain.
+				pending_doc = []
+				continue
 
 			if current_proc is not None and _RE_END_PROC.match(line):
 				# Finalize procedure.
@@ -471,31 +602,16 @@ class RegexFortranLexer(FortranLexer):
 			t = _RE_TYPE_DEF.match(line)
 			if t and scope_kind in {"module", "submodule"} and scope_name:
 				name = t.group("name")
-				doc = flush_doc()
-				entry = FortranType(name=name, doc=doc, location=SourceLocation(path=path, lineno=idx))
-				if scope_kind == "module":
-					current = modules.get(scope_name)
-					if current:
-						modules[scope_name] = FortranModuleInfo(
-							name=current.name,
-							doc=current.doc,
-							procedures=current.procedures,
-							types=[*current.types, entry],
-							interfaces=current.interfaces,
-							location=current.location,
-						)
-				else:
-					current = submodules.get(scope_name)
-					if current:
-						submodules[scope_name] = FortranSubmoduleInfo(
-							name=current.name,
-							parent=current.parent,
-							doc=current.doc,
-							procedures=current.procedures,
-							types=[*current.types, entry],
-							interfaces=current.interfaces,
-							location=current.location,
-						)
+				current_type = {
+					"name": name,
+					"doc": flush_doc(),
+					"location": SourceLocation(path=path, lineno=idx),
+					"container_kind": scope_kind,
+					"container_name": scope_name,
+					"in_type_contains": False,
+					"components": [],
+					"bound_procedures": [],
+				}
 				continue
 
 			iface = _match_interface(line)

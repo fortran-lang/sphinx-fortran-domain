@@ -31,7 +31,7 @@ templates_path = ['_templates']
 exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 
 # Select a lexer (built-in: "regex")
-fortran_lexer = "regex"
+fortran_lexer = "ford"
 
 # Doc comment markers to recognize (comment-only lines)
 fortran_doc_chars = ["!", ">"]

@@ -7,6 +7,7 @@ from typing import Dict, List, Optional, Sequence
 
 from sphinx_fortran_domain.lexers import (
     FortranArgument,
+    FortranComponent,
     FortranInterface,
     FortranLexer,
     FortranModuleInfo,
@@ -15,6 +16,7 @@ from sphinx_fortran_domain.lexers import (
     FortranProgramInfo,
     FortranSubmoduleInfo,
     FortranType,
+    FortranTypeBoundProcedure,
     SourceLocation,
 )
 
@@ -127,6 +129,34 @@ def _arg_decl_from_ford(arg: object) -> Optional[str]:
     deduped = [a for a in attrs if a.lower() not in low]
     if deduped:
         return f"{base}, {', '.join(deduped)}"
+    return base
+
+
+def _var_decl_from_ford(var: object) -> Optional[str]:
+    """Best-effort variable/field declaration for derived type components."""
+    base: Optional[str] = None
+    for attr in ("full_declaration", "declaration", "full_type", "type", "vartype"):
+        val = getattr(var, attr, None)
+        if not val:
+            continue
+        s = str(val).strip()
+        if not s:
+            continue
+        if "::" in s:
+            s = s.split("::", 1)[0].strip()
+        base = s or None
+        break
+
+    dim = getattr(var, "dimension", None)
+    if dim:
+        ds = str(dim).strip()
+        if ds:
+            # Some FORD versions already include a "(3,3)" in full_declaration.
+            if base is None:
+                base = f"dimension({ds.strip('()')})"
+            elif "dimension" not in base.lower() and ds not in base:
+                base = f"{base}, dimension({ds.strip('()')})"
+
     return base
 
 
@@ -379,7 +409,50 @@ class FORDFortranLexer(FortranLexer):
         for s in getattr(item, "subroutines", []) or []:
             procedures.append(self._convert_procedure(s, kind="subroutine"))
         for t in getattr(item, "types", []) or []:
-            types.append(FortranType(name=str(getattr(t, "name", "")), doc=_get_doc(t), location=_get_location(t)))
+            components: List[FortranComponent] = []
+            for v in getattr(t, "variables", []) or []:
+                vname = str(getattr(v, "name", "")).strip()
+                if not vname:
+                    continue
+                components.append(
+                    FortranComponent(
+                        name=vname,
+                        decl=_var_decl_from_ford(v),
+                        doc=_get_doc(v),
+                        location=_get_location(v),
+                    )
+                )
+
+            bound: List[FortranTypeBoundProcedure] = []
+            for bp in getattr(t, "boundprocs", []) or []:
+                bname = str(getattr(bp, "name", "")).strip()
+                if not bname:
+                    continue
+                target = None
+                bindings = getattr(bp, "bindings", None)
+                if isinstance(bindings, (list, tuple)) and bindings:
+                    try:
+                        target = str(bindings[0]).strip() or None
+                    except Exception:
+                        target = None
+                bound.append(
+                    FortranTypeBoundProcedure(
+                        name=bname,
+                        target=target or bname,
+                        doc=_get_doc(bp),
+                        location=_get_location(bp),
+                    )
+                )
+
+            types.append(
+                FortranType(
+                    name=str(getattr(t, "name", "")),
+                    doc=_get_doc(t),
+                    components=components,
+                    bound_procedures=bound,
+                    location=_get_location(t),
+                )
+            )
         for i in getattr(item, "interfaces", []) or []:
             interfaces.append(FortranInterface(name=str(getattr(i, "name", "")), doc=_get_doc(i), location=_get_location(i)))
 
@@ -413,7 +486,50 @@ class FORDFortranLexer(FortranLexer):
         for s in getattr(item, "subroutines", []) or []:
             procedures.append(self._convert_procedure(s, kind="subroutine"))
         for t in getattr(item, "types", []) or []:
-            types.append(FortranType(name=str(getattr(t, "name", "")), doc=_get_doc(t), location=_get_location(t)))
+            components: List[FortranComponent] = []
+            for v in getattr(t, "variables", []) or []:
+                vname = str(getattr(v, "name", "")).strip()
+                if not vname:
+                    continue
+                components.append(
+                    FortranComponent(
+                        name=vname,
+                        decl=_var_decl_from_ford(v),
+                        doc=_get_doc(v),
+                        location=_get_location(v),
+                    )
+                )
+
+            bound: List[FortranTypeBoundProcedure] = []
+            for bp in getattr(t, "boundprocs", []) or []:
+                bname = str(getattr(bp, "name", "")).strip()
+                if not bname:
+                    continue
+                target = None
+                bindings = getattr(bp, "bindings", None)
+                if isinstance(bindings, (list, tuple)) and bindings:
+                    try:
+                        target = str(bindings[0]).strip() or None
+                    except Exception:
+                        target = None
+                bound.append(
+                    FortranTypeBoundProcedure(
+                        name=bname,
+                        target=target or bname,
+                        doc=_get_doc(bp),
+                        location=_get_location(bp),
+                    )
+                )
+
+            types.append(
+                FortranType(
+                    name=str(getattr(t, "name", "")),
+                    doc=_get_doc(t),
+                    components=components,
+                    bound_procedures=bound,
+                    location=_get_location(t),
+                )
+            )
         for i in getattr(item, "interfaces", []) or []:
             interfaces.append(FortranInterface(name=str(getattr(i, "name", "")), doc=_get_doc(i), location=_get_location(i)))
 
