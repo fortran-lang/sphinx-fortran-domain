@@ -9,6 +9,64 @@ from sphinx import addnodes
 from sphinx.directives import ObjectDescription
 from sphinx.util.parsing import nested_parse_to_nodes
 
+
+_RE_DOC_SECTION = re.compile(r"^\s*##\s+(?P<title>\S.*?\S)\s*$")
+_RE_FOOTNOTE_DEF = re.compile(r"^\s*\.\.\s*\[(?P<label>\d+|#)\]\s+")
+
+
+def _preprocess_fortran_docstring(text: str) -> str:
+	"""Normalize a lightweight docstring convention into valid reST.
+
+	Supported patterns:
+	- Section markers: "## References" -> ".. rubric:: References"
+	- Example blocks: contiguous lines starting with ">>>" -> ".. code-block:: fortran"
+	"""
+	lines = (text or "").splitlines()
+	out: list[str] = []
+	i = 0
+	while i < len(lines):
+		line = lines[i]
+		m = _RE_DOC_SECTION.match(line)
+		if m:
+			title = m.group("title")
+			if out and out[-1].strip() != "":
+				out.append("")
+			out.append(f".. rubric:: {title}")
+			out.append("")
+			i += 1
+			continue
+
+		if line.lstrip().startswith(">>>"):
+			block: list[str] = []
+			while i < len(lines) and lines[i].lstrip().startswith(">>>"):
+				s = lines[i].lstrip()[3:]
+				block.append(s.lstrip(" \t"))
+				i += 1
+
+			if out and out[-1].strip() != "":
+				out.append("")
+			out.append(".. code-block:: fortran")
+			out.append("")
+			for b in block:
+				out.append("   " + b)
+			out.append("")
+			continue
+
+		out.append(line)
+		i += 1
+
+		# Make footnote/citation definitions robust in docstring fragments.
+		# In reST, a footnote definition must be preceded by a blank line.
+		# Many docstrings omit that blank line, which causes undefined refs like [1]_.
+		# We insert it here for common `.. [n] ...` patterns.
+		if _RE_FOOTNOTE_DEF.match(line):
+			# If the previous non-empty line isn't blank, insert a blank line *before*
+			# this definition. Because we've already appended the line, adjust in-place.
+			if len(out) >= 2 and out[-2].strip() != "":
+				out.insert(len(out) - 1, "")
+
+	return "\n".join(out).rstrip()
+
 def _make_object_id(objtype: str, fullname: str) -> str:
     # ``nodes.make_id`` produces a valid HTML id fragment.
     return nodes.make_id(f"f-{objtype}-{fullname}")
@@ -18,7 +76,7 @@ def _append_doc(section: nodes.Element, doc: str | None, state) -> None:
 	if not doc:
 		return
 
-	text = str(doc)
+	text = _preprocess_fortran_docstring(str(doc))
 	content = StringList(text.splitlines(), source="<fortran-doc>")
 	# Always render docstrings inside a description container.
 	container: nodes.Element = nodes.description()

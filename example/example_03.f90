@@ -38,6 +38,15 @@ contains
     !>
     !> .. math:: \vec{c} = \vec{a} + \vec{b} = (a_x + b_x, a_y + b_y, a_z + b_z)
     !>
+    !> ## Examples
+    !> >>> use math_utilities, only: vector_type, vector_add
+    !> >>> type(vector_type) :: v1, v2, v3
+    !> >>> v1 = vector_type(1.0, 2.0, 3.0)
+    !> >>> v2 = vector_type(4.0, 5.0, 6.0)
+    !> >>> v3 = vector_add(v1, v2)
+    !> >>> print *, v3%x, v3%y, v3%z
+    !> 5.0, 7.0, 9.0
+    !>
     pure function vector_add(a, b) result(c)
         type(vector_type), intent(in) :: a !> First vector
         type(vector_type), intent(in) :: b !> Second vector  
@@ -65,6 +74,11 @@ contains
     !> Calculate magnitude of a vector.
     !>
     !> The magnitude is :math:`|\vec{v}| = \sqrt{x^2 + y^2 + z^2}`.
+    !>
+    !> ## References
+    !> Cite the relevant literature, e.g. [1]_.
+    !> .. [1] "Norm (mathematics)," Wikipedia. [Online]. Available: https://en.wikipedia.org/wiki/Norm_(mathematics). [Accessed: 22-Dec-2025].
+    !>
     pure function vector_magnitude(v) result(mag)
         !> Input vector
         type(vector_type), intent(in) :: v
