@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sphinx-fortran-domain"
-version = "0.0.0"
+dynamic = ["version"]
 description = "A modern Sphinx domain for Fortran"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -22,6 +22,9 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.dynamic]
+version = {file = "VERSION"}
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
