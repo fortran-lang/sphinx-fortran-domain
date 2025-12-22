@@ -269,19 +269,6 @@ def _choose_ford_marker(configured_markers: Sequence[str]) -> str:
     return "!>"
 
 
-def _pick_safe_alt(preferred: str, forbidden: Sequence[str], *, fallback: str) -> str:
-    if preferred and preferred not in forbidden:
-        return preferred
-    if fallback and fallback not in forbidden:
-        return fallback
-    # Last resort: scan printable ASCII.
-    for code in range(33, 127):
-        ch = chr(code)
-        if ch not in forbidden:
-            return ch
-    return "#"
-
-
 def _ford_settings_and_marker(doc_markers: Sequence[str], *, directory: Path) -> tuple[ProjectSettings, str]:
     ford_marker = _choose_ford_marker(doc_markers)
     if len(ford_marker) != 2 or ford_marker[0] == ford_marker[1]:
