@@ -199,23 +199,15 @@ def setup(app: Sphinx):
 	app.add_config_value("fortran_sources", default=[], rebuild="env")
 	app.add_config_value("fortran_lexer", default="regex", rebuild="env")
 	app.add_config_value("fortran_doc_chars", default=[">"], rebuild="env")
-	# Backward-compatible alias (prefer fortran_doc_chars).
-	app.add_config_value("fortran_doc_markers", default=[], rebuild="env")
 	app.add_config_value(
 		"fortran_file_extensions",
 		default=[
-			".f",
-			".F",
-			".for",
-			".FOR",
-			".f90",
-			".F90",
-			".f95",
-			".F95",
-			".f03",
-			".F03",
-			".f08",
-			".F08",
+			".f", ".F",
+			".for", ".FOR",
+			".f90", ".F90",
+			".f95", ".F95",
+			".f03", ".F03",
+			".f08", ".F08",
 		],
 		rebuild="env",
 	)
