@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from importlib import metadata
 from pathlib import Path
 import glob
 import hashlib
@@ -16,6 +17,32 @@ from sphinx_fortran_domain.lexers import get_lexer, register_builtin_lexers
 
 
 logger = logging.getLogger(__name__)
+
+
+def _read_root_version_file() -> str | None:
+	# Layout: <root>/src/sphinx_fortran_domain/__init__.py
+	root = Path(__file__).resolve().parents[2]
+	try:
+		return (root / "VERSION").read_text(encoding="utf-8").strip()
+	except OSError:
+		return None
+
+
+def _detect_version() -> str:
+	# Prefer installed distribution metadata (works for wheels and editable installs).
+	try:
+		v = metadata.version("sphinx-fortran-domain")
+		if v:
+			return v
+	except metadata.PackageNotFoundError:
+		pass
+
+	# Fallback for source checkouts without an installed dist.
+	v = _read_root_version_file()
+	return v or "0.0.0"
+
+
+__version__ = _detect_version()
 
 
 def _safe_mtime(path: Path) -> float:
@@ -216,7 +243,7 @@ def setup(app: Sphinx):
 	app.connect("env-get-outdated", _maybe_force_reread)
 
 	return {
-		"version": "0.0.0",
+		"version": __version__,
 		"parallel_read_safe": True,
 		"parallel_write_safe": True,
 	}
