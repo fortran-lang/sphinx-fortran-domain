@@ -214,10 +214,21 @@ def _prepare_text_for_ford(text: str, configured_markers: Sequence[str], *, ford
         indent_len = len(line) - len(stripped)
         indent = line[:indent_len]
 
+        def _drop_single_leading_ws(s: str) -> str:
+            # Most doc markers are written as "!> <text>".
+            # When we rewrite markers for FORD, preserving that single space
+            # makes subsequent paragraphs look indented in reST, which becomes
+            # a blockquote (notably wrapping math blocks/roles).
+            # Drop at most one leading whitespace character while still
+            # allowing authors to intentionally indent content.
+            if s.startswith((" ", "\t")):
+                return s[1:]
+            return s
+
         replaced_leading = False
         for m in markers:
             if stripped.startswith(m):
-                out.append(indent + ford_marker + stripped[len(m) :])
+                out.append(indent + ford_marker + _drop_single_leading_ws(stripped[len(m) :]))
                 replaced_leading = True
                 break
         if replaced_leading:
