@@ -1,0 +1,4 @@
+/* Reduce the PyData theme's top-left navbar project title size. */
+.bd-header .navbar-brand .logo__title {
+  font-size: var(--pst-font-size-base);
+}

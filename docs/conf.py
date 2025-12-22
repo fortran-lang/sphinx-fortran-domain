@@ -13,7 +13,8 @@ sys.path.insert(0, os.path.abspath('../src'))
 project = 'Sphinx Fortran Domain'
 copyright = '2025, Sphinx Fortran Domain maintainers'
 author = 'fortran-lang community'
-release = '0.0.0'
+with open(os.path.join("..", "VERSION")) as f:
+    release = f.read().strip()
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
@@ -45,6 +46,14 @@ fortran_sources = [
 
 html_theme = 'pydata_sphinx_theme'
 html_static_path = ['_static']
+
+# Keep the top-left navbar title concise.
+html_title = f"{project} {release}"
+
+# Small theme override(s).
+html_css_files = [
+    "custom.css",
+]
 
 # If true, the current module name will be prepended to all description
 # unit titles (such as .. function::).
