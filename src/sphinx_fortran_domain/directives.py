@@ -14,6 +14,52 @@ _RE_DOC_SECTION = re.compile(r"^\s*##\s+(?P<title>\S.*?\S)\s*$")
 _RE_FOOTNOTE_DEF = re.compile(r"^\s*\.\.\s*\[(?P<label>\d+|#)\]\s+")
 
 
+def _split_out_examples_sections(text: str | None) -> tuple[str | None, str | None]:
+	"""Split docstring into (main, examples) where examples are '## Example(s)' sections.
+
+	We treat sections introduced by our lightweight marker syntax ("## Title").
+	If the title is "Example" or "Examples" (case-insensitive), we extract that
+	section (including its content until the next "##" marker) and return it
+	separately so callers can render it at the end.
+	"""
+	if not text:
+		return None, None
+
+	lines = str(text).splitlines()
+	main: list[str] = []
+	examples: list[str] = []
+	i = 0
+	while i < len(lines):
+		line = lines[i]
+		m = _RE_DOC_SECTION.match(line)
+		if not m:
+			main.append(line)
+			i += 1
+			continue
+
+		title = (m.group("title") or "").strip().lower()
+		is_examples = title in {"example", "examples"}
+
+		# Capture this section (header + body until next section header).
+		section_lines: list[str] = [line]
+		i += 1
+		while i < len(lines) and not _RE_DOC_SECTION.match(lines[i]):
+			section_lines.append(lines[i])
+			i += 1
+
+		if is_examples:
+			# Ensure examples start on a clean boundary when appended.
+			if examples and examples[-1].strip() != "":
+				examples.append("")
+			examples.extend(section_lines)
+		else:
+			main.extend(section_lines)
+
+	main_text = "\n".join(main).strip() or None
+	examples_text = "\n".join(examples).strip() or None
+	return main_text, examples_text
+
+
 def _preprocess_fortran_docstring(text: str) -> str:
 	"""Normalize a lightweight docstring convention into valid reST.
 
@@ -339,12 +385,15 @@ def _append_object_description(
 	desc += signode
 
 	content = addnodes.desc_content()
-	_append_doc(content, doc, state)
+	main_doc, examples_doc = _split_out_examples_sections(doc)
+	_append_doc(content, main_doc, state)
 	_append_argument_docs(content, args, state)
 	if objtype == "function":
 		_append_return_docs(content, result, state)
 	_append_component_docs(content, components, state)
 	_append_type_bound_procedures(content, bindings, all_procedures, state)
+	# Always put Examples at the end of the object documentation.
+	_append_doc(content, examples_doc, state)
 	desc += content
 
 	section += desc

@@ -60,6 +60,12 @@ contains
     !> Subtract two vectors component-wise
     !>
     !>```fortran
+    !>    ! This code snippet is in-line documentation only
+    !>    use math_utilities, only: vector_type
+    !>```
+    !>
+    !>## Examples
+    !>```fortran
     !>    use math_utilities, only: vector_type, vector_add
     !>    type(vector_type) :: v1, v2, v3
     !>    v1 = vector_type(1.0, 2.0, 3.0)

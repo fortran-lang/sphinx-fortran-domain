@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sphinx_fortran_domain.directives import _preprocess_fortran_docstring
+from sphinx_fortran_domain.directives import _preprocess_fortran_docstring, _split_out_examples_sections
 
 
 def test_preprocess_sections_to_rubrics() -> None:
@@ -40,3 +40,64 @@ Cite the relevant literature, e.g. [1]_.
 
     out = _preprocess_fortran_docstring(text)
     assert "e.g. [1]_.\n\n.. [1]" in out
+
+
+def test_split_out_examples_sections_moves_examples_to_end() -> None:
+    text = """Summary
+
+## Examples
+>>> call foo(a)
+
+## Notes
+Something important.
+"""
+
+    main, examples = _split_out_examples_sections(text)
+    assert main and "## Examples" not in main
+    assert "## Notes" in main
+    assert examples and "## Examples" in examples
+
+
+def test_split_out_examples_sections_keeps_non_examples_in_place() -> None:
+    text = """## Notes
+Text.
+"""
+    main, examples = _split_out_examples_sections(text)
+    assert main == text.strip()
+    assert examples is None
+
+
+def test_split_out_examples_sections_keeps_fenced_blocks_in_place() -> None:
+    text = """Summary
+
+```fortran
+print *, 'hello'
+```
+
+## Notes
+More text.
+"""
+
+    main, examples = _split_out_examples_sections(text)
+    assert main and "```fortran" in main
+    assert "## Notes" in main
+    assert examples is None
+
+
+def test_split_out_examples_sections_moves_examples_section_with_fences() -> None:
+    text = """Summary
+
+## Examples
+```fortran
+print *, 'hello'
+```
+
+## Notes
+More text.
+"""
+
+    main, examples = _split_out_examples_sections(text)
+    assert main and "## Examples" not in main
+    assert "## Notes" in main
+    assert examples and "## Examples" in examples
+    assert "```fortran" in examples
