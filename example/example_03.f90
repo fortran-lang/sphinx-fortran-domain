@@ -58,13 +58,21 @@ contains
     end function vector_add
     
     !> Subtract two vectors component-wise
+    !>
+    !>```fortran
+    !>    use math_utilities, only: vector_type, vector_add
+    !>    type(vector_type) :: v1, v2, v3
+    !>    v1 = vector_type(1.0, 2.0, 3.0)
+    !>    v2 = vector_type(4.0, 5.0, 6.0)
+    !>    v3 = vector_subtract(v2, v1)
+    !>    print *, v3%x, v3%y, v3%z
+    !> ```
+    !> 3.0, 3.0, 3.0
+    !>
     pure function vector_subtract(a, b) result(c)
-        !> First vector
-        type(vector_type), intent(in) :: a
-        !> Second vector
-        type(vector_type), intent(in) :: b
-        !> Result vector
-        type(vector_type) :: c
+        type(vector_type), intent(in) :: a !> First vector
+        type(vector_type), intent(in) :: b !> Second vector
+        type(vector_type) :: c !> Result vector
         
         c%x = a%x - b%x
         c%y = a%y - b%y
@@ -89,6 +97,10 @@ contains
     end function vector_magnitude
     
     !> Multiply two 3x3 matrices
+    !> 
+    !> ## Notes
+    !> Some very important information to retain when multiplying matrices ...
+    !>
     pure function matrix_multiply(a, b) result(c)
         type(matrix_type), intent(in) :: a !> First matrix
         type(matrix_type), intent(in) :: b !> Second matrix

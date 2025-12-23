@@ -51,6 +51,31 @@ def _preprocess_fortran_docstring(text: str) -> str:
 				out.append("   " + b)
 			out.append("")
 			continue
+		
+		stripped = line.lstrip()
+		if stripped.startswith("```"):
+			# Extract language if provided
+			fence = stripped[3:].strip()   # after "```"
+			language = fence if fence else "fortran"
+
+			block: list[str] = []
+			i += 1
+			while i < len(lines):
+				s = lines[i].lstrip()
+				if s.startswith("```"):
+					i += 1
+					break
+				block.append(s.rstrip("\t"))
+				i += 1
+
+			if out and out[-1].strip() != "":
+				out.append("")
+			out.append(f".. code-block:: {language}")
+			out.append("")
+			for b in block:
+				out.append("   " + b)
+			out.append("")
+			continue
 
 		out.append(line)
 		i += 1
