@@ -24,4 +24,12 @@ module math_utils
     real :: res  !> The result of the multiplication
     res = x * y
   end function multiply_reals
+
+  !> Nomr of array
+  pure function norm_array(array) result(res)
+    real, intent(in) :: array(:)  !> The real numbers to multiply
+    real :: res  !> The result of the multiplication
+    res = norm2(array)
+  end function norm_array
+
 end module math_utils

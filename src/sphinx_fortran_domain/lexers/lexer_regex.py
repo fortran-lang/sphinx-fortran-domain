@@ -120,6 +120,32 @@ def _decl_from_declaration(line: str) -> Optional[str]:
 	return left or None
 
 
+def _dims_from_declaration(line: str) -> Dict[str, str]:
+	"""Extract per-variable array specs from a declaration line.
+
+	Example: "real, intent(in) :: a(:), b(1:3)" -> {"a": ":", "b": "1:3"}
+	"""
+	code = _strip_inline_comment(line)
+	if "::" not in code:
+		return {}
+	after = code.split("::", 1)[1]
+	out: Dict[str, str] = {}
+	for token in _split_top_level_commas(after):
+		t = token.strip()
+		if not t:
+			continue
+		# Remove initializations.
+		lhs = t.split("=", 1)[0].strip()
+		m = re.match(r"^([A-Za-z_]\w*)\s*\(([^)]*)\)", lhs)
+		if not m:
+			continue
+		name = m.group(1)
+		dims = (m.group(2) or "").strip()
+		if name and dims:
+			out[name] = dims
+	return out
+
+
 def _normalize_proc_signature(raw: str) -> str:
 	# Convert "... result(res)" into "... -> res" for functions.
 	s = " ".join(raw.split())
@@ -585,10 +611,16 @@ class RegexFortranLexer(FortranLexer):
 					doc_part = line[pos + len(marker) :].strip()
 					if doc_part:
 						decl = _decl_from_declaration(code_part)
+						dims = _dims_from_declaration(code_part)
 						for n in _declared_names_from_declaration(code_part):
 							if n in current_proc["arg_set"]:
-								if decl and n not in current_proc["arg_decls"]:
-									current_proc["arg_decls"][n] = decl
+								if n not in current_proc["arg_decls"]:
+									decl_n = decl
+									dim_n = dims.get(n)
+									if dim_n and (decl_n is None or "dimension" not in decl_n.lower()):
+										decl_n = f"{decl_n}, dimension({dim_n})".strip(", ") if decl_n else f"dimension({dim_n})"
+									if decl_n:
+										current_proc["arg_decls"][n] = decl_n
 								prev = current_proc["arg_docs"].get(n)
 								current_proc["arg_docs"][n] = (prev + "\n" + doc_part).strip() if prev else doc_part
 						pending_doc = []
@@ -599,22 +631,33 @@ class RegexFortranLexer(FortranLexer):
 					declared = _declared_names_from_declaration(line)
 					if declared:
 						decl = _decl_from_declaration(line)
+						dims = _dims_from_declaration(line)
 						doc_part = flush_doc()
 						if doc_part:
 							for n in declared:
 								if n in current_proc["arg_set"]:
-									if decl and n not in current_proc["arg_decls"]:
-										current_proc["arg_decls"][n] = decl
+									if n not in current_proc["arg_decls"]:
+										decl_n = decl
+										dim_n = dims.get(n)
+										if dim_n and (decl_n is None or "dimension" not in decl_n.lower()):
+											decl_n = f"{decl_n}, dimension({dim_n})".strip(", ") if decl_n else f"dimension({dim_n})"
+										if decl_n:
+											current_proc["arg_decls"][n] = decl_n
 									prev = current_proc["arg_docs"].get(n)
 									current_proc["arg_docs"][n] = (prev + "\n" + doc_part).strip() if prev else doc_part
 							continue
 
 				# Capture declarations even without docs.
 				decl = _decl_from_declaration(line)
-				if decl:
-					for n in _declared_names_from_declaration(line):
-						if n in current_proc["arg_set"] and n not in current_proc["arg_decls"]:
-							current_proc["arg_decls"][n] = decl
+				dims = _dims_from_declaration(line)
+				for n in _declared_names_from_declaration(line):
+					if n in current_proc["arg_set"] and n not in current_proc["arg_decls"]:
+						decl_n = decl
+						dim_n = dims.get(n)
+						if dim_n and (decl_n is None or "dimension" not in decl_n.lower()):
+							decl_n = f"{decl_n}, dimension({dim_n})".strip(", ") if decl_n else f"dimension({dim_n})"
+						if decl_n:
+							current_proc["arg_decls"][n] = decl_n
 
 			t = _RE_TYPE_DEF.match(line)
 			if t and scope_kind in {"module", "submodule"} and scope_name:

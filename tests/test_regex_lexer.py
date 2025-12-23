@@ -57,6 +57,13 @@ def test_regex_lexer_parses_examples() -> None:
     # And argument docs should not leak into the procedure description.
     assert "first integer" not in add.doc.lower()
 
+    # Array arguments should include their dimension.
+    norm = next((p for p in math_utils.procedures if p.name == "norm_array"), None)
+    assert norm is not None
+    arg_arr = next((a for a in getattr(norm, "arguments", []) if a.name == "array"), None)
+    assert arg_arr is not None
+    assert arg_arr.decl and "dimension(:)" in arg_arr.decl.lower()
+
 
 def test_regex_lexer_parses_programs() -> None:
     root = Path(__file__).resolve().parents[1]

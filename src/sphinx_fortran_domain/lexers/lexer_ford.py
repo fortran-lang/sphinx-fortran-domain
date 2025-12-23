@@ -99,6 +99,7 @@ def _arg_decl_from_ford(arg: object) -> Optional[str]:
             base = str(vt).strip() or None
 
     attrs: List[str] = []
+    base_dim_from_decl: Optional[str] = None
 
     intent = getattr(arg, "intent", None)
     if intent:
@@ -120,6 +121,25 @@ def _arg_decl_from_ford(arg: object) -> Optional[str]:
         s = str(dim).strip()
         if s:
             attrs.append(f"dimension({s.strip('()')})")
+
+    # array specs are standalone tokens in the base declaration, e.g. "real, (:), intent(in)".
+    # Normalize *any* standalone "(...)" token into dimension(...), e.g.:
+    #   (*)  (:,:)  (d,m,*)  (..)  etc.
+    if base is not None and "," in base:
+        parts = [p.strip() for p in base.split(",")]
+        kept: List[str] = []
+        for p in parts:
+            sp = p.strip()
+            if sp.startswith("(") and sp.endswith(")") and "=" not in sp:
+                inner = sp[1:-1].strip()
+                # If FORD provided a standalone paren token, assume it's an array spec.
+                if inner:
+                    base_dim_from_decl = inner
+                continue
+            kept.append(sp)
+        base = ", ".join([k for k in kept if k]) or None
+        if base_dim_from_decl and not dim:
+            attrs.append(f"dimension({base_dim_from_decl.strip('()')})")
 
     if base is None:
         return ", ".join(attrs) if attrs else None

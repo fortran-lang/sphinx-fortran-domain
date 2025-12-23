@@ -5,6 +5,14 @@ from pathlib import Path
 import pytest
 
 
+def _has_standalone_dim_token(decl: str) -> bool:
+    # Detect comma-separated bare "(:)" (or similar) tokens.
+    # Valid output should use dimension(:) instead.
+    import re
+
+    return re.search(r"(?:^|,)\s*\([^=]*:\s*[^=]*\)\s*(?:,|$)", decl) is not None
+
+
 def test_ford_lexer_parses_examples_without_crashing() -> None:
     ford = pytest.importorskip("ford")
     assert ford is not None
@@ -33,6 +41,15 @@ def test_ford_lexer_parses_examples_without_crashing() -> None:
     # FORD may provide a full declaration; ensure we capture something useful when present.
     assert arg_a.decl
     assert "intent" in arg_a.decl.lower()
+
+    # Array argument should not produce a standalone "(:)" token in the decl.
+    norm = next((p for p in math_utils.procedures if p.name == "norm_array"), None)
+    assert norm is not None
+    arg_arr = next((a for a in getattr(norm, "arguments", []) if a.name == "array"), None)
+    assert arg_arr is not None
+    assert arg_arr.decl
+    assert "dimension" in arg_arr.decl.lower()
+    assert not _has_standalone_dim_token(arg_arr.decl)
 
     # Derived type members and type-bound procedures
     example_module = result.modules["example_module"]
