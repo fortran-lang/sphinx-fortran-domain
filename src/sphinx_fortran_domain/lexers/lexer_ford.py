@@ -581,6 +581,18 @@ class FORDFortranLexer(FortranLexer):
                 )
             )
 
+        result: Optional[FortranArgument] = None
+        if kind == "function":
+            ret = getattr(proc, "retvar", None) or getattr(proc, "result", None)
+            rname = str(getattr(ret, "name", "")).strip() if ret is not None else ""
+            if rname:
+                result = FortranArgument(
+                    name=rname,
+                    decl=_var_decl_from_ford(ret),
+                    doc=_get_doc(ret),
+                    location=_get_location(ret),
+                )
+
         return FortranProcedure(
             name=name,
             kind=kind,
@@ -588,4 +600,5 @@ class FORDFortranLexer(FortranLexer):
             doc=_get_doc(proc),
             location=_get_location(proc),
             arguments=tuple(args),
+            result=result,
         )

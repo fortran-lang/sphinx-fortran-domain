@@ -64,6 +64,16 @@ def test_regex_lexer_parses_examples() -> None:
     assert arg_arr is not None
     assert arg_arr.decl and "dimension(:)" in arg_arr.decl.lower()
 
+    # Function result variable should be captured and documented.
+    mul = next((p for p in math_utils.procedures if p.name == "multiply_reals"), None)
+    assert mul is not None
+    res = getattr(mul, "result", None)
+    assert res is not None
+    assert res.name == "res"
+    assert res.doc and "result of the multiplication" in res.doc.lower()
+    # Result should not be duplicated as a regular argument.
+    assert all(a.name != "res" for a in getattr(mul, "arguments", []))
+
 
 def test_regex_lexer_parses_programs() -> None:
     root = Path(__file__).resolve().parents[1]

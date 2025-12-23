@@ -462,6 +462,18 @@ class RegexFortranLexer(FortranLexer):
 					doc=proc_doc,
 					location=current_proc["location"],
 					arguments=tuple(args),
+					result=(
+						FortranArgument(
+							name=str(current_proc.get("result_name")),
+							decl=current_proc.get("result_decl"),
+							doc=current_proc.get("result_doc"),
+							location=None,
+						)
+						if kind == "function"
+						and current_proc.get("result_name")
+						and (current_proc.get("result_decl") is not None or current_proc.get("result_doc") is not None)
+						else None
+					),
 				)
 
 				if current_proc["container_kind"] == "module":
@@ -589,6 +601,9 @@ class RegexFortranLexer(FortranLexer):
 					"location": SourceLocation(path=path, lineno=idx),
 					"container_kind": scope_kind,
 					"container_name": scope_name,
+					"result_name": None,
+					"result_doc": None,
+					"result_decl": None,
 					"arg_order": arg_order,
 					"arg_set": set(arg_order),
 					"arg_docs": {},
@@ -600,6 +615,9 @@ class RegexFortranLexer(FortranLexer):
 					"in_proc_doc_phase": pre_sig_doc is None,
 					"signature": _normalize_proc_signature(raw_sig),
 				}
+				if kind == "function":
+					mres = _RE_RESULT.search(raw_sig)
+					current_proc["result_name"] = mres.group(1) if mres else name
 				continue
 
 			if current_proc is not None:
@@ -623,6 +641,16 @@ class RegexFortranLexer(FortranLexer):
 										current_proc["arg_decls"][n] = decl_n
 								prev = current_proc["arg_docs"].get(n)
 								current_proc["arg_docs"][n] = (prev + "\n" + doc_part).strip() if prev else doc_part
+							elif n == current_proc.get("result_name"):
+								if current_proc.get("result_decl") is None:
+									decl_n = decl
+									dim_n = dims.get(n)
+									if dim_n and (decl_n is None or "dimension" not in decl_n.lower()):
+										decl_n = f"{decl_n}, dimension({dim_n})".strip(", ") if decl_n else f"dimension({dim_n})"
+									if decl_n:
+										current_proc["result_decl"] = decl_n
+								prev = current_proc.get("result_doc")
+								current_proc["result_doc"] = (prev + "\n" + doc_part).strip() if prev else doc_part
 						pending_doc = []
 						continue
 
@@ -645,6 +673,16 @@ class RegexFortranLexer(FortranLexer):
 											current_proc["arg_decls"][n] = decl_n
 									prev = current_proc["arg_docs"].get(n)
 									current_proc["arg_docs"][n] = (prev + "\n" + doc_part).strip() if prev else doc_part
+								elif n == current_proc.get("result_name"):
+									if current_proc.get("result_decl") is None:
+										decl_n = decl
+										dim_n = dims.get(n)
+										if dim_n and (decl_n is None or "dimension" not in decl_n.lower()):
+											decl_n = f"{decl_n}, dimension({dim_n})".strip(", ") if decl_n else f"dimension({dim_n})"
+										if decl_n:
+											current_proc["result_decl"] = decl_n
+									prev = current_proc.get("result_doc")
+									current_proc["result_doc"] = (prev + "\n" + doc_part).strip() if prev else doc_part
 							continue
 
 				# Capture declarations even without docs.
@@ -658,6 +696,13 @@ class RegexFortranLexer(FortranLexer):
 							decl_n = f"{decl_n}, dimension({dim_n})".strip(", ") if decl_n else f"dimension({dim_n})"
 						if decl_n:
 							current_proc["arg_decls"][n] = decl_n
+					elif n == current_proc.get("result_name") and current_proc.get("result_decl") is None:
+						decl_n = decl
+						dim_n = dims.get(n)
+						if dim_n and (decl_n is None or "dimension" not in decl_n.lower()):
+							decl_n = f"{decl_n}, dimension({dim_n})".strip(", ") if decl_n else f"dimension({dim_n})"
+						if decl_n:
+							current_proc["result_decl"] = decl_n
 
 			t = _RE_TYPE_DEF.match(line)
 			if t and scope_kind in {"module", "submodule"} and scope_name:

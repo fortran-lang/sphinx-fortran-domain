@@ -195,6 +195,40 @@ def _append_argument_docs(section: nodes.Element, args, state) -> None:
 	section += _field_list("Arguments", dl)
 
 
+def _append_return_docs(section: nodes.Element, result, state) -> None:
+	if not result:
+		return
+	name = getattr(result, "name", "")
+	decl = getattr(result, "decl", None) or ""
+	doc = getattr(result, "doc", None)
+	if not name:
+		return
+
+	dl = nodes.definition_list()
+	dl["classes"].append("simple")
+	_stamp_source_line(dl)
+
+	item = nodes.definition_list_item()
+	_stamp_source_line(item)
+	term = nodes.term()
+	_stamp_source_line(term)
+	term += nodes.strong(text=str(name))
+	item += term
+	if decl:
+		classifier = nodes.classifier(text=str(decl))
+		_stamp_source_line(classifier)
+		item += classifier
+
+	definition = nodes.definition()
+	_stamp_source_line(definition)
+	for n in _parse_doc_fragment(doc, state):
+		definition += n
+	item += definition
+	dl += item
+
+	section += _field_list("Returns", dl)
+
+
 def _append_component_docs(section: nodes.Element, components, state) -> None:
 	if not components:
 		return
@@ -285,6 +319,7 @@ def _append_object_description(
 	doc: str | None,
 	state,
 	args=None,
+	result=None,
 	components=None,
 	bindings=None,
 	all_procedures=None,
@@ -306,6 +341,8 @@ def _append_object_description(
 	content = addnodes.desc_content()
 	_append_doc(content, doc, state)
 	_append_argument_docs(content, args, state)
+	if objtype == "function":
+		_append_return_docs(content, result, state)
 	_append_component_docs(content, components, state)
 	_append_type_bound_procedures(content, bindings, all_procedures, state)
 	desc += content
@@ -443,6 +480,7 @@ class FortranModule(Directive):
 					doc=getattr(p, "doc", None),
 					state=self.state,
 					args=getattr(p, "arguments", None),
+					result=getattr(p, "result", None),
 				)
 				section += sub
 
@@ -525,6 +563,7 @@ class FortranSubmodule(Directive):
 					doc=getattr(p, "doc", None),
 					state=self.state,
 					args=getattr(p, "arguments", None),
+					result=getattr(p, "result", None),
 				)
 				section += sub
 

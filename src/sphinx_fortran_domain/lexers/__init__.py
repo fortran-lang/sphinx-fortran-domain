@@ -27,6 +27,9 @@ class FortranProcedure:
 	doc: str | None = None
 	location: SourceLocation | None = None
 	arguments: Sequence[FortranArgument] = field(default_factory=tuple)
+	# For functions, the result variable (e.g. `result(res)` or implicit function-name result).
+	# Stored as a FortranArgument to reuse decl/doc formatting.
+	result: FortranArgument | None = None
 
 
 @dataclass(frozen=True)

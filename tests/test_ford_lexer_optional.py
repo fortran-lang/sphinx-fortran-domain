@@ -51,6 +51,14 @@ def test_ford_lexer_parses_examples_without_crashing() -> None:
     assert "dimension" in arg_arr.decl.lower()
     assert not _has_standalone_dim_token(arg_arr.decl)
 
+    # Function result variable should be captured and documented.
+    mul = next((p for p in math_utils.procedures if p.name == "multiply_reals"), None)
+    assert mul is not None
+    res = getattr(mul, "result", None)
+    assert res is not None
+    assert res.name == "res"
+    assert res.doc and "result of the multiplication" in res.doc.lower()
+
     # Derived type members and type-bound procedures
     example_module = result.modules["example_module"]
     t_vec = next((t for t in example_module.types if t.name == "vector_type"), None)
