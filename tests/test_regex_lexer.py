@@ -54,6 +54,9 @@ def test_regex_lexer_parses_examples() -> None:
     # Procedure doc should remain on the procedure, not be merged into arg docs.
     assert add.doc and "adds two integers" in add.doc.lower()
 
+    # And argument docs should not leak into the procedure description.
+    assert "first integer" not in add.doc.lower()
+
 
 def test_regex_lexer_parses_programs() -> None:
     root = Path(__file__).resolve().parents[1]

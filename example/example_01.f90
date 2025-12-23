@@ -8,9 +8,13 @@ module math_utils
   !> Adds two integers and returns the result
   !> but the comment continues in the next line
   subroutine add_integers(a, b, c)
-    integer, intent(in) :: a   !> The first integer to add
-    integer, intent(in) :: b   !> The second integer to add
-    integer, intent(out) :: c  !> The result of the addition
+    
+    !> The first integer to add
+    integer, intent(in) :: a   
+    !> The second integer to add
+    integer, intent(in) :: b   
+    !> The result of the addition
+    integer, intent(out) :: c  
     c = a + b
   end subroutine add_integers
 

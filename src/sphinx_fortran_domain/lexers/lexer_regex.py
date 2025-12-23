@@ -253,8 +253,11 @@ class RegexFortranLexer(FortranLexer):
 			doc_text = _is_doc_line(raw, doc_markers)
 			if doc_text is not None:
 				if current_proc is not None and current_proc.get("in_proc_doc_phase"):
-					# Procedure-level doc (immediately after signature).
-					current_proc["proc_doc_lines"].append(doc_text)
+					# Doc lines immediately after a signature are ambiguous:
+					# - If the next non-doc statement is an argument declaration, they document that argument.
+					# - Otherwise they are procedure-level docs.
+					# Buffer them until we see the next non-doc statement.
+					current_proc["post_sig_doc_buffer"].append(doc_text)
 					continue
 				if current_type is not None:
 					# Doc inside a derived type applies to the next component/binding.
@@ -274,7 +277,7 @@ class RegexFortranLexer(FortranLexer):
 			if raw.strip() == "":
 				# Keep doc blocks intact through blank lines.
 				if current_proc is not None and current_proc.get("in_proc_doc_phase"):
-					current_proc["proc_doc_lines"].append("")
+					current_proc["post_sig_doc_buffer"].append("")
 				elif current_type is not None and pending_doc:
 					pending_doc.append("")
 				elif pending_doc:
@@ -284,7 +287,17 @@ class RegexFortranLexer(FortranLexer):
 			line = raw
 
 			if current_proc is not None and current_proc.get("in_proc_doc_phase"):
-				# First non-doc, non-blank line ends the procedure-doc phase.
+				# First non-doc, non-blank line ends the post-signature doc phase.
+				# If the line is an argument declaration, treat buffered doc as pending arg docs.
+				buffer = list(current_proc.get("post_sig_doc_buffer") or [])
+				declared = _declared_names_from_declaration(line)
+				is_arg_decl = bool(declared) and any(n in current_proc.get("arg_set", set()) for n in declared)
+				if buffer:
+					if is_arg_decl:
+						pending_doc = buffer
+					else:
+						current_proc["proc_doc_lines"].extend(buffer)
+				current_proc["post_sig_doc_buffer"] = []
 				current_proc["in_proc_doc_phase"] = False
 
 			if current_type is not None:
@@ -542,10 +555,11 @@ class RegexFortranLexer(FortranLexer):
 			proc = _match_proc(line)
 			if proc and scope_kind in {"module", "submodule"} and scope_name:
 				kind, name, arg_order, raw_sig = proc
+				pre_sig_doc = flush_doc()
 				current_proc = {
 					"kind": kind,
 					"name": name,
-					"doc": flush_doc(),
+					"doc": pre_sig_doc,
 					"location": SourceLocation(path=path, lineno=idx),
 					"container_kind": scope_kind,
 					"container_name": scope_name,
@@ -554,7 +568,10 @@ class RegexFortranLexer(FortranLexer):
 					"arg_docs": {},
 					"arg_decls": {},
 					"proc_doc_lines": [],
-					"in_proc_doc_phase": True,
+					"post_sig_doc_buffer": [],
+					# If there is already doc before the signature, treat any post-signature
+					# doc lines as argument docs (not additional procedure docs).
+					"in_proc_doc_phase": pre_sig_doc is None,
 					"signature": _normalize_proc_signature(raw_sig),
 				}
 				continue
