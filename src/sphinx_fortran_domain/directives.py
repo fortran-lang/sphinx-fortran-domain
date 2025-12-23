@@ -103,8 +103,7 @@ def _append_doc(section: nodes.Element, doc: str | None, state) -> None:
 
 	text = _preprocess_fortran_docstring(str(doc))
 	content = StringList(text.splitlines(), source="<fortran-doc>")
-	# Always render docstrings inside a description container.
-	container: nodes.Element = nodes.description()
+	container: nodes.Element = nodes.container()
 
 	# Parse doc as a reST fragment so Sphinx roles/directives work (e.g. .. math::).
 	for n in nested_parse_to_nodes(
@@ -118,6 +117,43 @@ def _append_doc(section: nodes.Element, doc: str | None, state) -> None:
 		container += n
 
 	section += container
+
+
+def _parse_doc_fragment(doc: str | None, state) -> list[nodes.Node]:
+	if not doc:
+		return []
+	text = _preprocess_fortran_docstring(str(doc))
+	content = StringList(text.splitlines(), source="<fortran-doc>")
+	return list(
+		nested_parse_to_nodes(
+			state,
+			content,
+			source="<fortran-doc>",
+			offset=0,
+			allow_section_headings=True,
+			keep_title_context=True,
+		)
+	)
+
+
+def _field_list(title: str, body: nodes.Element) -> nodes.field_list:
+	fl = nodes.field_list()
+	field = nodes.field()
+	field += nodes.field_name(text=title)
+	fbody = nodes.field_body()
+	fbody += body
+	field += fbody
+	fl += field
+	return fl
+
+
+def _stamp_source_line(node: nodes.Node, *, source: str = "<fortran>", line: int = 1) -> None:
+	# Sphinx expects certain nodes (notably definition_list_item) to have
+	# a non-None .line during HTML builds.
+	if getattr(node, "source", None) is None:
+		node.source = source  # type: ignore[attr-defined]
+	if getattr(node, "line", None) is None:
+		node.line = line  # type: ignore[attr-defined]
 
 
 def _append_argument_docs(section: nodes.Element, args, state) -> None:
@@ -134,16 +170,29 @@ def _append_argument_docs(section: nodes.Element, args, state) -> None:
 	if not rows:
 		return
 
-	section += nodes.subtitle(text="Arguments")
+	dl = nodes.definition_list()
+	dl["classes"].append("simple")
+	_stamp_source_line(dl)
 	for name, decl, doc in rows:
-		line = nodes.paragraph()
-		line += nodes.strong(text=f"{name}:")
+		item = nodes.definition_list_item()
+		_stamp_source_line(item)
+		term = nodes.term()
+		_stamp_source_line(term)
+		term += nodes.strong(text=str(name))
+		item += term
 		if decl:
-			line += nodes.Text(" ")
-			line += nodes.literal(text=str(decl))
-		section += line
-		if doc:
-			_append_doc(section, str(doc), state)
+			classifier = nodes.classifier(text=str(decl))
+			_stamp_source_line(classifier)
+			item += classifier
+
+		definition = nodes.definition()
+		_stamp_source_line(definition)
+		for n in _parse_doc_fragment(doc, state):
+			definition += n
+		item += definition
+		dl += item
+
+	section += _field_list("Arguments", dl)
 
 
 def _append_component_docs(section: nodes.Element, components, state) -> None:
@@ -160,16 +209,29 @@ def _append_component_docs(section: nodes.Element, components, state) -> None:
 	if not rows:
 		return
 
-	section += nodes.subtitle(text="Members")
+	dl = nodes.definition_list()
+	dl["classes"].append("simple")
+	_stamp_source_line(dl)
 	for name, decl, doc in rows:
-		line = nodes.paragraph()
-		line += nodes.strong(text=f"{name}:")
+		item = nodes.definition_list_item()
+		_stamp_source_line(item)
+		term = nodes.term()
+		_stamp_source_line(term)
+		term += nodes.strong(text=str(name))
+		item += term
 		if decl:
-			line += nodes.Text(" ")
-			line += nodes.literal(text=str(decl))
-		section += line
-		if doc:
-			_append_doc(section, str(doc), state)
+			classifier = nodes.classifier(text=str(decl))
+			_stamp_source_line(classifier)
+			item += classifier
+
+		definition = nodes.definition()
+		_stamp_source_line(definition)
+		for n in _parse_doc_fragment(doc, state):
+			definition += n
+		item += definition
+		dl += item
+
+	section += _field_list("Members", dl)
 
 
 def _find_proc_by_name(procedures, name: str):
@@ -183,7 +245,6 @@ def _append_type_bound_procedures(section: nodes.Element, bindings, all_procedur
 	if not bindings:
 		return
 
-	section += nodes.subtitle(text="Procedures")
 	items = nodes.bullet_list()
 	for b in bindings:
 		bname = getattr(b, "name", "")
@@ -211,7 +272,45 @@ def _append_type_bound_procedures(section: nodes.Element, bindings, all_procedur
 		item = nodes.list_item("", para)
 		items += item
 
-	section += items
+	section += _field_list("Procedures", items)
+
+
+def _append_object_description(
+	section: nodes.Element,
+	*,
+	domain: str,
+	objtype: str,
+	name: str,
+	signature: str | None,
+	doc: str | None,
+	state,
+	args=None,
+	components=None,
+	bindings=None,
+	all_procedures=None,
+) -> None:
+	"""Render an object in a Sphinx-like <dl class="..."> wrapper.
+	"""
+	desc = addnodes.desc()
+	desc["domain"] = domain
+	desc["objtype"] = objtype
+	desc["classes"].extend([domain, objtype])
+
+	signode = addnodes.desc_signature()
+	# Keep signature rendering simple and stable: show the parsed signature text
+	# as a literal inside the signature node.
+	text = signature if signature else f"{objtype} {name}"
+	signode += nodes.literal(text=str(text))
+	desc += signode
+
+	content = addnodes.desc_content()
+	_append_doc(content, doc, state)
+	_append_argument_docs(content, args, state)
+	_append_component_docs(content, components, state)
+	_append_type_bound_procedures(content, bindings, all_procedures, state)
+	desc += content
+
+	section += desc
 
 class FortranObject(ObjectDescription[str]):
     """Base directive for Fortran objects (manual declarations)."""
@@ -310,9 +409,18 @@ class FortranModule(Directive):
 
 				sub = nodes.section(ids=[obj_anchor])
 				sub += nodes.title(text=f"Type {t.name}")
-				_append_doc(sub, getattr(t, "doc", None), self.state)
-				_append_component_docs(sub, getattr(t, "components", None), self.state)
-				_append_type_bound_procedures(sub, getattr(t, "bound_procedures", None), getattr(module, "procedures", None), self.state)
+				_append_object_description(
+					sub,
+					domain="f",
+					objtype="type",
+					name=str(t.name),
+					signature=getattr(t, "signature", None),
+					doc=getattr(t, "doc", None),
+					state=self.state,
+					components=getattr(t, "components", None),
+					bindings=getattr(t, "bound_procedures", None),
+					all_procedures=getattr(module, "procedures", None),
+				)
 				section += sub
 
 		if getattr(module, "procedures", None):
@@ -326,11 +434,16 @@ class FortranModule(Directive):
 
 				sub = nodes.section(ids=[obj_anchor])
 				sub += nodes.title(text=f"{kind.capitalize()} {p.name}")
-				sig = getattr(p, "signature", None)
-				if sig:
-					sub += nodes.literal_block(text=str(sig))
-				_append_doc(sub, getattr(p, "doc", None), self.state)
-				_append_argument_docs(sub, getattr(p, "arguments", None), self.state)
+				_append_object_description(
+					sub,
+					domain="f",
+					objtype=str(kind),
+					name=str(p.name),
+					signature=getattr(p, "signature", None),
+					doc=getattr(p, "doc", None),
+					state=self.state,
+					args=getattr(p, "arguments", None),
+				)
 				section += sub
 
 		if getattr(module, "interfaces", None):
@@ -378,9 +491,18 @@ class FortranSubmodule(Directive):
 
 				sub = nodes.section(ids=[obj_anchor])
 				sub += nodes.title(text=f"Type {t.name}")
-				_append_doc(sub, getattr(t, "doc", None), self.state)
-				_append_component_docs(sub, getattr(t, "components", None), self.state)
-				_append_type_bound_procedures(sub, getattr(t, "bound_procedures", None), getattr(submodule, "procedures", None), self.state)
+				_append_object_description(
+					sub,
+					domain="f",
+					objtype="type",
+					name=str(t.name),
+					signature=getattr(t, "signature", None),
+					doc=getattr(t, "doc", None),
+					state=self.state,
+					components=getattr(t, "components", None),
+					bindings=getattr(t, "bound_procedures", None),
+					all_procedures=getattr(submodule, "procedures", None),
+				)
 				section += sub
 
 		if getattr(submodule, "procedures", None):
@@ -394,11 +516,16 @@ class FortranSubmodule(Directive):
 
 				sub = nodes.section(ids=[obj_anchor])
 				sub += nodes.title(text=f"{kind.capitalize()} {p.name}")
-				sig = getattr(p, "signature", None)
-				if sig:
-					sub += nodes.literal_block(text=str(sig))
-				_append_doc(sub, getattr(p, "doc", None), self.state)
-				_append_argument_docs(sub, getattr(p, "arguments", None), self.state)
+				_append_object_description(
+					sub,
+					domain="f",
+					objtype=str(kind),
+					name=str(p.name),
+					signature=getattr(p, "signature", None),
+					doc=getattr(p, "doc", None),
+					state=self.state,
+					args=getattr(p, "arguments", None),
+				)
 				section += sub
 
 		if getattr(submodule, "interfaces", None):
