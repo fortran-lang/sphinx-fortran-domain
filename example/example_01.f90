@@ -8,7 +8,7 @@ module math_utils
   !> Adds two integers and returns the result
   !> but the comment continues in the next line
   subroutine add_integers(a, b, c)
-    
+
     !> The first integer to add
     integer, intent(in) :: a   
     !> The second integer to add
@@ -20,8 +20,7 @@ module math_utils
 
   !> Multiplies two real numbers and returns the result
   elemental function multiply_reals(x, y) result(res)
-    real, intent(in) :: x   !> The first real number to multiply
-    real, intent(in) :: y   !> The second real number to multiply
+    real, intent(in) :: x , y  !> The real numbers to multiply
     real :: res  !> The result of the multiplication
     res = x * y
   end function multiply_reals
