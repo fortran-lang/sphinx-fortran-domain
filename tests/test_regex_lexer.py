@@ -64,6 +64,16 @@ def test_regex_lexer_parses_examples() -> None:
     assert arg_arr is not None
     assert arg_arr.decl and "dimension(:)" in arg_arr.decl.lower()
 
+    # Derived type component decl should include dimension + default initializer.
+    math_utilities = result.modules.get("math_utilities")
+    assert math_utilities is not None
+    t_mat = next((t for t in math_utilities.types if t.name == "matrix_type"), None)
+    assert t_mat is not None
+    elements = next((c for c in getattr(t_mat, "components", []) if c.name == "elements"), None)
+    assert elements is not None
+    assert elements.decl and "dimension(3,3)" in elements.decl.replace(" ", "").lower()
+    assert elements.decl and "dimension(3,3),default=0.0" in elements.decl.replace(" ", "").lower()
+
     # Function result variable should be captured and documented.
     mul = next((p for p in math_utils.procedures if p.name == "multiply_reals"), None)
     assert mul is not None

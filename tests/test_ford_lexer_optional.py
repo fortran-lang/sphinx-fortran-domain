@@ -74,3 +74,15 @@ def test_ford_lexer_parses_examples_without_crashing() -> None:
     mag = next((b for b in bps if b.name == "magnitude"), None)
     assert mag is not None
     assert (mag.target or "").lower().endswith("vector_magnitude")
+
+    # Derived type component decl should include dimension + default initializer.
+    math_utilities = result.modules.get("math_utilities")
+    assert math_utilities is not None
+    t_mat = next((t for t in math_utilities.types if t.name == "matrix_type"), None)
+    assert t_mat is not None
+    elements = next((c for c in getattr(t_mat, "components", []) if c.name == "elements"), None)
+    assert elements is not None
+    assert elements.decl
+    assert "dimension" in elements.decl.lower()
+    assert "3" in elements.decl
+    assert "default" in elements.decl.lower()

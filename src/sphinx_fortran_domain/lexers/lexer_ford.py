@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import os
+import re
 import tempfile
 from typing import Dict, List, Optional, Sequence
 
@@ -155,6 +156,7 @@ def _arg_decl_from_ford(arg: object) -> Optional[str]:
 def _var_decl_from_ford(var: object) -> Optional[str]:
     """Best-effort variable/field declaration for derived type components."""
     base: Optional[str] = None
+    rhs: Optional[str] = None
     for attr in ("full_declaration", "declaration", "full_type", "type", "vartype"):
         val = getattr(var, attr, None)
         if not val:
@@ -163,9 +165,29 @@ def _var_decl_from_ford(var: object) -> Optional[str]:
         if not s:
             continue
         if "::" in s:
-            s = s.split("::", 1)[0].strip()
+            left, right = s.split("::", 1)
+            rhs = right.strip() or rhs
+            s = left.strip()
         base = s or None
         break
+
+    # array specs may appear as standalone tokens in the base declaration, e.g. "real, (3,3)".
+    # Normalize *any* standalone "(...)" token into dimension(...).
+    base_dim_from_decl: Optional[str] = None
+    if base is not None and "," in base:
+        parts = [p.strip() for p in base.split(",")]
+        kept: List[str] = []
+        for p in parts:
+            sp = p.strip()
+            if sp.startswith("(") and sp.endswith(")") and "=" not in sp:
+                inner = sp[1:-1].strip()
+                if inner:
+                    base_dim_from_decl = inner
+                continue
+            kept.append(sp)
+        base = ", ".join([k for k in kept if k]) or None
+        if base is not None and base_dim_from_decl and "dimension" not in base.lower():
+            base = f"{base}, dimension({base_dim_from_decl.strip('()')})"
 
     dim = getattr(var, "dimension", None)
     if dim:
@@ -176,6 +198,32 @@ def _var_decl_from_ford(var: object) -> Optional[str]:
                 base = f"dimension({ds.strip('()')})"
             elif "dimension" not in base.lower() and ds not in base:
                 base = f"{base}, dimension({ds.strip('()')})"
+
+    # Capture default initializer when available in full_declaration.
+    # FORD typically stores "real :: elements(3,3) = 0.0"; we render name separately,
+    # so we only append ": dimension(...)" and ", Default = <init>" to the decl/classifier.
+    if rhs:
+        name = str(getattr(var, "name", "")).strip()
+        if name:
+            m = re.search(rf"\b{re.escape(name)}\b\s*(?:\(([^)]*)\))?\s*(?:=\s*(.*))?$", rhs)
+            if m:
+                dims = (m.group(1) or "").strip()
+                init = (m.group(2) or "").strip()
+                if dims and base is not None and "dimension" not in base.lower():
+                    base = f"{base}, dimension({dims})"
+                if init and base is not None and "default" not in base.lower():
+                    base = f"{base}, Default = {init}"
+
+    # Fallback: some FORD objects expose initializer separately.
+    if base is not None and "default" not in base.lower():
+        for attr in ("initial", "initial_value", "init", "value", "default", "default_value"):
+            val = getattr(var, attr, None)
+            if val is None:
+                continue
+            s = str(val).strip()
+            if s:
+                base = f"{base}, Default = {s}"
+                break
 
     return base
 

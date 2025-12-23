@@ -146,6 +146,29 @@ def _dims_from_declaration(line: str) -> Dict[str, str]:
 	return out
 
 
+def _inits_from_declaration(line: str) -> Dict[str, str]:
+	"""Extract per-variable initializer from a declaration line.
+
+	Example: "real :: a = 1.0, b(3) = 0.0" -> {"a": "1.0", "b": "0.0"}
+	"""
+	code = _strip_inline_comment(line)
+	if "::" not in code:
+		return {}
+	after = code.split("::", 1)[1]
+	out: Dict[str, str] = {}
+	for token in _split_top_level_commas(after):
+		t = token.strip()
+		if not t or "=" not in t:
+			continue
+		lhs, rhs = t.split("=", 1)
+		lhs = lhs.strip()
+		rhs = rhs.strip()
+		m = re.match(r"^([A-Za-z_]\w*)\b", lhs)
+		if m and rhs:
+			out[m.group(1)] = rhs
+	return out
+
+
 def _normalize_proc_signature(raw: str) -> str:
 	# Convert "... result(res)" into "... -> res" for functions.
 	s = " ".join(raw.split())
@@ -415,15 +438,26 @@ class RegexFortranLexer(FortranLexer):
 
 				names = _declared_names_from_declaration(code_part)
 				decl = _decl_from_declaration(code_part)
+				dims = _dims_from_declaration(code_part)
+				inits = _inits_from_declaration(code_part)
 				if names and decl:
 					doc = flush_doc()
 					if doc_inline:
 						doc = f"{doc}\n{doc_inline}".strip() if doc else doc_inline
 					for n in names:
+						decl_n = decl
+						dim_n = dims.get(n)
+						if dim_n and "dimension" not in (decl_n or "").lower():
+							decl_n = f"{decl_n}, dimension({dim_n})".strip(", ")
+						init_n = inits.get(n)
+						if init_n:
+							decl_n = (
+								f"{decl_n}, Default = {init_n}".strip(", ") if decl_n else f"Default = {init_n}"
+							)
 						current_type["components"].append(
 							FortranComponent(
 								name=n,
-								decl=decl,
+								decl=decl_n,
 								doc=doc,
 								location=SourceLocation(path=path, lineno=idx),
 							)
