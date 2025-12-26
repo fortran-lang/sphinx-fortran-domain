@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from sphinx_fortran_domain.directives import _preprocess_fortran_docstring, _split_out_examples_sections
+from sphinx_fortran_domain.directives import (
+    _preprocess_fortran_docstring,
+    _split_out_examples_sections,
+    _split_literate_fortran_source,
+)
 
 
 def test_preprocess_sections_to_rubrics() -> None:
@@ -101,3 +105,19 @@ More text.
     assert "## Notes" in main
     assert examples and "## Examples" in examples
     assert "```fortran" in examples
+
+
+def test_split_literate_fortran_source_interleaves_doc_and_code() -> None:
+    src = """program demo
+!> This is *doc*.
+integer :: i
+!> Second paragraph.
+print *, i
+end program demo
+"""
+
+    blocks = _split_literate_fortran_source(src, doc_markers=["!>"])
+    kinds = [k for (k, _) in blocks]
+    assert kinds == ["code", "doc", "code", "doc", "code"]
+    assert "This is *doc*." in blocks[1][1]
+    assert "print *" in blocks[-1][1]

@@ -29,6 +29,10 @@ _RE_END_SUBMODULE = re.compile(r"^\s*end\s*submodule\b", re.IGNORECASE)
 _RE_PROGRAM = re.compile(r"^\s*program\s+([A-Za-z_]\w*)\b", re.IGNORECASE)
 _RE_END_PROGRAM = re.compile(r"^\s*end\s*program\b", re.IGNORECASE)
 _RE_CONTAINS = re.compile(r"^\s*contains\b", re.IGNORECASE)
+_RE_USE = re.compile(
+	r"^\s*use\b\s*(?:,\s*(?:non_intrinsic|intrinsic)\s*)?(?:\s*::\s*)?([A-Za-z_]\w*)\b",
+	re.IGNORECASE,
+)
 # Derived type definition: `type [,...] :: name`.
 # Avoid matching declarations like `type(foo) :: var` (note the parentheses).
 _RE_TYPE_DEF = re.compile(
@@ -256,6 +260,9 @@ class RegexFortranLexer(FortranLexer):
 		scope_name: Optional[str] = None
 		scope_parent: Optional[str] = None
 		in_header_doc_phase = False
+		current_program_lines: List[str] | None = None
+		in_program_contains = False
+		current_program_deps: set[str] | None = None
 
 		current_proc: Optional[dict] = None
 		current_type: Optional[dict] = None
@@ -295,9 +302,29 @@ class RegexFortranLexer(FortranLexer):
 			if current is None:
 				return
 			updated = (current.doc + "\n" + text).strip() if current.doc else text.strip()
-			programs[scope_name] = FortranProgramInfo(name=current.name, doc=updated, location=current.location)
+			programs[scope_name] = FortranProgramInfo(
+				name=current.name,
+				doc=updated,
+				location=current.location,
+				dependencies=getattr(current, "dependencies", ()),
+				procedures=getattr(current, "procedures", ()),
+				source=getattr(current, "source", None),
+			)
 
 		for idx, raw in enumerate(lines, start=1):
+			# While inside a program unit, capture the full program source.
+			if scope_kind == "program" and scope_name and current_program_lines is not None:
+				current_program_lines.append(raw)
+
+			# Collect program dependencies from USE statements up to CONTAINS.
+			if scope_kind == "program" and scope_name and not in_program_contains:
+				code = _strip_inline_comment(raw)
+				muse = _RE_USE.match(code)
+				if muse and current_program_deps is not None:
+					modname = (muse.group(1) or "").strip()
+					if modname:
+						current_program_deps.add(modname)
+
 			# If we are inside a procedure, allow parsing of inline/preceding arg docs.
 			doc_text = _is_doc_line(raw, doc_markers)
 			if doc_text is not None:
@@ -315,9 +342,8 @@ class RegexFortranLexer(FortranLexer):
 				if in_header_doc_phase:
 					if scope_kind == "module":
 						add_module_doc_line(doc_text)
-					elif scope_kind == "program":
-						add_program_doc_line(doc_text)
 					else:
+						# For programs, we render doc markers from the embedded source to avoid duplication.
 						add_to_pending(doc_text)
 				else:
 					add_to_pending(doc_text)
@@ -533,6 +559,17 @@ class RegexFortranLexer(FortranLexer):
 							interfaces=container.interfaces,
 							location=container.location,
 						)
+				elif current_proc["container_kind"] == "program":
+					container = programs.get(current_proc["container_name"])  # type: ignore[arg-type]
+					if container:
+						programs[current_proc["container_name"]] = FortranProgramInfo(
+							name=container.name,
+							doc=container.doc,
+							location=container.location,
+							dependencies=getattr(container, "dependencies", ()),
+							procedures=[*getattr(container, "procedures", ()), entry],
+							source=getattr(container, "source", None),
+						)
 
 				current_proc = None
 				pending_doc = []
@@ -581,11 +618,18 @@ class RegexFortranLexer(FortranLexer):
 					name=name,
 					doc=flush_doc(),
 					location=SourceLocation(path=path, lineno=idx),
+					dependencies=(),
+					procedures=[],
+					source=None,
 				)
 				scope_kind = "program"
 				scope_name = name
 				scope_parent = None
 				in_header_doc_phase = True
+				# Seed capture with the current `program ...` line.
+				current_program_lines = [raw]
+				in_program_contains = False
+				current_program_deps = set()
 				continue
 
 			if scope_kind == "module" and _RE_END_MODULE.match(line):
@@ -605,10 +649,25 @@ class RegexFortranLexer(FortranLexer):
 				continue
 
 			if scope_kind == "program" and _RE_END_PROGRAM.match(line):
+				# Finalize program unit and attach captured program source + dependencies.
+				if scope_name and current_program_lines is not None:
+					current = programs.get(scope_name)
+					if current is not None:
+						programs[scope_name] = FortranProgramInfo(
+							name=current.name,
+							doc=current.doc,
+							location=current.location,
+							procedures=getattr(current, "procedures", ()),
+							dependencies=tuple(sorted((current_program_deps or set()))),
+							source="\n".join(current_program_lines),
+						)
 				scope_kind = None
 				scope_name = None
 				scope_parent = None
 				in_header_doc_phase = False
+				current_program_lines = None
+				in_program_contains = False
+				current_program_deps = None
 				pending_doc = []
 				continue
 
@@ -618,14 +677,25 @@ class RegexFortranLexer(FortranLexer):
 				if stripped.startswith(("use ", "implicit ", "private", "public")):
 					continue
 				if _RE_CONTAINS.match(line):
+					if scope_kind == "program":
+						in_program_contains = True
 					in_header_doc_phase = False
 					continue
 				# Any other statement ends header doc collection.
 				in_header_doc_phase = False
 
+			# Program CONTAINS marks the transition to internal procedures.
+			if scope_kind == "program" and _RE_CONTAINS.match(line):
+				in_program_contains = True
+				pending_doc = []
+				continue
+
 			# Collect symbols into the current scope
 			proc = _match_proc(line)
-			if proc and scope_kind in {"module", "submodule"} and scope_name:
+			if proc and scope_name and (
+				scope_kind in {"module", "submodule"}
+				or (scope_kind == "program" and in_program_contains)
+			):
 				kind, name, arg_order, raw_sig = proc
 				pre_sig_doc = flush_doc()
 				current_proc = {

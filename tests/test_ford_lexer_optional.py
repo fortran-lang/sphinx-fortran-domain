@@ -30,6 +30,12 @@ def test_ford_lexer_parses_examples_without_crashing() -> None:
     assert "example_module" in result.modules
     assert "math_utils" in result.modules
 
+    # Programs and their internal procedures (after CONTAINS)
+    assert "test_program" in result.programs
+    prog = result.programs["test_program"]
+    assert getattr(prog, "procedures", None)
+    assert any(p.name == "example_internal_procedure" and p.kind == "function" for p in prog.procedures)
+
     math_utils = result.modules["math_utils"]
     add = next((p for p in math_utils.procedures if p.name == "add_integers"), None)
     assert add is not None

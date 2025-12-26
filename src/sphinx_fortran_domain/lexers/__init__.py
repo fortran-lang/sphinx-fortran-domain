@@ -94,6 +94,13 @@ class FortranProgramInfo:
 	name: str
 	doc: str | None = None
 	location: SourceLocation | None = None
+	# Modules referenced via USE statements in the main program unit.
+	dependencies: Sequence[str] = field(default_factory=tuple)
+	# Internal procedures (after `contains`).
+	procedures: Sequence[FortranProcedure] = field(default_factory=list)
+	# Optional raw source text for the full program unit (best-effort), including
+	# the `program` and `end program` lines and any internal procedures.
+	source: str | None = None
 
 
 @dataclass(frozen=True)

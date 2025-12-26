@@ -210,17 +210,3 @@ contains
     end function matrix_inverse
 
 end module math_utilities
-
-!> Simple utility functions outside of modules
-program test_program
-    use math_utilities
-    implicit none
-    
-    type(vector_type) :: v1, v2, v3
-    
-    ! Example usage
-    v1 = vector_type(1.0, 2.0, 3.0)
-    v2 = vector_type(4.0, 5.0, 6.0)
-    v3 = vector_add(v1, v2)
-    
-end program test_program

@@ -87,9 +87,25 @@ def test_regex_lexer_parses_examples() -> None:
 
 def test_regex_lexer_parses_programs() -> None:
     root = Path(__file__).resolve().parents[1]
-    f = root / "example" / "example_03.f90"
+    f = root / "example" / "example_05.f90"
 
     lexer = RegexFortranLexer()
     result = lexer.parse([str(f)], doc_markers=["!", ">"])
 
     assert "test_program" in result.programs
+    prog = result.programs["test_program"]
+    assert prog.source
+    assert "program test_program" in prog.source.lower()
+    # The embedded program source should include the full program unit.
+    assert "contains" in prog.source.lower()
+    assert "end program" in prog.source.lower()
+
+    deps = list(getattr(prog, "dependencies", []) or [])
+    assert "math_utilities" in [d.lower() for d in deps]
+
+    # Internal procedures (after CONTAINS) should be parsed and attached to the program.
+    assert getattr(prog, "procedures", None)
+    assert any(p.name == "example_internal_procedure" and p.kind == "function" for p in prog.procedures)
+    internal = next((p for p in prog.procedures if p.name == "example_internal_procedure"), None)
+    assert internal is not None
+    assert internal.doc and "internal helper" in internal.doc.lower()

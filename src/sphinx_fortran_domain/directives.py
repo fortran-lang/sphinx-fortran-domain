@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import glob
+import os
 import re
+from pathlib import Path
 
 from docutils import nodes
 from docutils.parsers.rst import Directive
+from docutils.parsers.rst import directives as rst_directives
 from docutils.statemachine import StringList
 from sphinx import addnodes
 from sphinx.directives import ObjectDescription
@@ -12,6 +16,161 @@ from sphinx.util.parsing import nested_parse_to_nodes
 
 _RE_DOC_SECTION = re.compile(r"^\s*##\s+(?P<title>\S.*?\S)\s*$")
 _RE_FOOTNOTE_DEF = re.compile(r"^\s*\.\.\s*\[(?P<label>\d+|#)\]\s+")
+_RE_END_PROGRAM = re.compile(r"^\s*end\s*program\b", re.IGNORECASE)
+_RE_CONTAINS = re.compile(r"^\s*contains\b", re.IGNORECASE)
+_RE_USE = re.compile(
+	r"^\s*use\b\s*(?:,\s*(?:non_intrinsic|intrinsic)\s*)?(?:\s*::\s*)?([A-Za-z_]\w*)\b",
+	re.IGNORECASE,
+)
+
+
+def _as_list(value) -> list[str]:
+	if value is None:
+		return []
+	if isinstance(value, str):
+		return [value]
+	return [str(v) for v in value]
+
+
+def _doc_markers_from_env(env) -> list[str]:
+	"""Return configured Fortran doc markers (e.g. ['!>'])."""
+	chars = getattr(getattr(env, "app", None), "config", None)
+	chars = getattr(chars, "fortran_doc_chars", None)
+	markers: list[str] = []
+	if chars is not None:
+		if isinstance(chars, str):
+			chars_list = [c for c in chars if c.strip()]
+		else:
+			chars_list = [str(c) for c in (chars or [])]
+		chars_list = [c for c in chars_list if c]
+		if chars_list:
+			markers = ["!" + c for c in chars_list]
+
+	if not markers:
+		cfg = getattr(getattr(env, "app", None), "config", None)
+		m = getattr(cfg, "fortran_doc_markers", None)
+		if isinstance(m, str):
+			markers = [m]
+		else:
+			markers = [str(x) for x in (m or [])]
+		markers = [x for x in markers if x]
+
+	return markers or ["!>"]
+
+
+def _collect_fortran_files_from_env(env) -> list[str]:
+	app = getattr(env, "app", None)
+	if app is None:
+		return []
+	confdir = Path(getattr(app, "confdir", os.getcwd()))
+	config = getattr(app, "config", None)
+	roots = _as_list(getattr(config, "fortran_sources", []))
+	exts = {e.lower() for e in _as_list(getattr(config, "fortran_file_extensions", []))}
+	if not roots:
+		return []
+
+	files: list[str] = []
+	for root in roots:
+		root = str(root)
+		if any(ch in root for ch in "*?["):
+			pattern = str(confdir / root)
+			for match in glob.glob(pattern, recursive=True):
+				p = Path(match)
+				if p.is_file() and (not exts or p.suffix.lower() in exts):
+					files.append(str(p))
+			continue
+
+		p = Path(root)
+		if not p.is_absolute():
+			p = confdir / p
+		if p.is_dir():
+			for child in p.rglob("*"):
+				if child.is_file() and (not exts or child.suffix.lower() in exts):
+					files.append(str(child))
+			continue
+		if p.is_file() and (not exts or p.suffix.lower() in exts):
+			files.append(str(p))
+
+	# Deterministic order
+	return sorted(set(files))
+
+
+def _find_program_in_file(lines: list[str], progname: str, *, start_at: int = 0) -> int | None:
+	pat = re.compile(rf"^\s*program\s+{re.escape(str(progname))}\b", re.IGNORECASE)
+	for i in range(max(start_at, 0), len(lines)):
+		if pat.match(lines[i]):
+			return i
+	return None
+
+
+def _extract_predoc_before_line(lines: list[str], idx: int, *, doc_markers: list[str]) -> str | None:
+	if idx <= 0:
+		return None
+	markers = [m for m in (doc_markers or []) if m and m.strip()]
+	buf: list[str] = []
+	i = idx - 1
+	while i >= 0:
+		line = lines[i]
+		stripped = line.lstrip()
+		marker = next((m for m in markers if stripped.startswith(m)), None)
+		if marker is None:
+			break
+		buf.append(stripped[len(marker) :].lstrip(" \t").rstrip())
+		i -= 1
+	if not buf:
+		return None
+	buf.reverse()
+	text = "\n".join(buf).strip()
+	return text or None
+
+
+def _extract_use_dependencies_from_source(source: str) -> list[str]:
+	deps: list[str] = []
+	seen: set[str] = set()
+	for raw in (source or "").splitlines():
+		if _RE_CONTAINS.match(raw) or _RE_END_PROGRAM.match(raw):
+			break
+		code = raw.split("!", 1)[0]
+		m = _RE_USE.match(code)
+		if not m:
+			continue
+		name = (m.group(1) or "").strip()
+		key = name.lower()
+		if name and key not in seen:
+			seen.add(key)
+			deps.append(name)
+	return deps
+
+
+def _read_program_source_by_search(env, progname: str, *, doc_markers: list[str]) -> tuple[str | None, str | None]:
+	"""Find and read a program unit by scanning configured fortran_sources.
+
+	Returns (source, predoc) where predoc is doc lines immediately preceding
+	the program statement (using configured doc_markers).
+	"""
+	files = _collect_fortran_files_from_env(env)
+	if not files:
+		return (None, None)
+
+	for path in files:
+		try:
+			text = Path(path).read_text(encoding="utf-8", errors="replace")
+		except OSError:
+			continue
+		lines = text.splitlines()
+		start = _find_program_in_file(lines, progname)
+		if start is None:
+			continue
+
+		predoc = _extract_predoc_before_line(lines, start, doc_markers=doc_markers)
+		buf: list[str] = []
+		for i in range(start, len(lines)):
+			buf.append(lines[i])
+			if _RE_END_PROGRAM.match(lines[i]):
+				break
+		return ("\n".join(buf), predoc)
+
+	return (None, None)
 
 
 def _split_out_examples_sections(text: str | None) -> tuple[str | None, str | None]:
@@ -163,6 +322,103 @@ def _append_doc(section: nodes.Element, doc: str | None, state) -> None:
 		container += n
 
 	section += container
+
+def _split_literate_fortran_source(source: str, *, doc_markers: list[str]) -> list[tuple[str, str]]:
+	"""Split Fortran source into blocks: ('doc'|'code', text).
+
+	Lines starting with a configured doc marker (e.g. '!>') become 'doc' blocks;
+	other lines become 'code' blocks. The intent is a small literate-programming view
+	for programs.
+	"""
+	if not source:
+		return []
+
+	markers = [m for m in (doc_markers or []) if m and m.strip()]
+	lines = str(source).splitlines()
+	out: list[tuple[str, list[str]]] = []
+	cur_kind: str | None = None
+	cur: list[str] = []
+
+	def flush() -> None:
+		nonlocal cur_kind, cur
+		if cur_kind is None:
+			return
+		text = "\n".join(cur).rstrip()
+		if text.strip() != "":
+			out.append((cur_kind, cur))
+		cur_kind = None
+		cur = []
+
+	for line in lines:
+		stripped = line.lstrip()
+		marker = next((m for m in markers if stripped.startswith(m)), None)
+		if marker is not None:
+			# Doc line.
+			if cur_kind != "doc":
+				flush()
+				cur_kind = "doc"
+			text = stripped[len(marker) :].lstrip(" \t")
+			cur.append(text)
+			continue
+
+		# Code line.
+		if cur_kind != "code":
+			flush()
+			cur_kind = "code"
+		cur.append(line)
+
+	flush()
+	# Normalize to flat tuples.
+	return [(k, "\n".join(v).rstrip() + "\n") for (k, v) in out]
+
+
+def _read_program_source_from_location(location) -> str | None:
+	"""Best-effort read of a program unit source from its file location."""
+	if location is None:
+		return None
+	path = getattr(location, "path", None)
+	lineno = getattr(location, "lineno", None)
+	if not path or not lineno:
+		return None
+	try:
+		with open(path, "r", encoding="utf-8", errors="replace") as f:
+			lines = f.read().splitlines()
+	except OSError:
+		return None
+
+	start = max(int(lineno) - 1, 0)
+	buf: list[str] = []
+	for i in range(start, len(lines)):
+		buf.append(lines[i])
+		if re.match(r"^\s*end\s*program\b", lines[i], flags=re.IGNORECASE):
+			break
+	return "\n".join(buf)
+
+def _append_fortran_code_block(section: nodes.Element, *, source: str) -> None:
+	text = (source or "").rstrip() + "\n"
+	lit = nodes.literal_block(text, text)
+	lit["language"] = "fortran"
+	section += lit
+
+
+def _append_program_dependencies(section: nodes.Element, *, dependencies, state) -> None:
+	deps = [str(d).strip() for d in (dependencies or []) if str(d).strip()]
+	if not deps:
+		return
+	items = nodes.bullet_list()
+	for dep in deps:
+		xref = addnodes.pending_xref(
+			"",
+			refdomain="f",
+			reftype="module",
+			reftarget=dep,
+			refexplicit=True,
+		)
+		xref += nodes.literal(text=dep)
+		items += nodes.list_item("", nodes.paragraph("", "", xref))
+
+	section += nodes.subtitle(text="Dependencies")
+	section += items
 
 
 def _parse_doc_fragment(doc: str | None, state) -> list[nodes.Node]:
@@ -444,12 +700,22 @@ class FortranInterface(FortranObject):
 
 class FortranProgram(Directive):
 	required_arguments = 1
+	option_spec = {
+		"procedures": rst_directives.flag,
+		"no-procedures": rst_directives.flag,
+	}
 
 	def run(self):
 		progname = self.arguments[0]
 		env = self.state.document.settings.env
 		domain = env.get_domain("f")
 		program = getattr(domain, "get_program")(progname)
+
+		show_procedures = True
+		if "no-procedures" in self.options:
+			show_procedures = False
+		if "procedures" in self.options:
+			show_procedures = True
 
 		anchor = nodes.make_id(f"f-program-{progname}")
 		index = addnodes.index(entries=[("single", f"{progname} (program)", anchor, "", None)])
@@ -460,7 +726,65 @@ class FortranProgram(Directive):
 		if program is None:
 			return [index, nodes.warning(text=f"Fortran program '{progname}' not found (did you configure fortran_sources?)")]
 
-		_append_doc(section, getattr(program, "doc", None), self.state)
+		markers = _doc_markers_from_env(env)
+		src = getattr(program, "source", None) or _read_program_source_from_location(getattr(program, "location", None))
+		predoc: str | None = None
+		if not src:
+			src, predoc = _read_program_source_by_search(env, progname, doc_markers=markers)
+		else:
+			# If we have a usable file location, try to re-read to extract only the doc
+			# block immediately preceding the program statement (important for FORD,
+			# which may include in-body docs in program.doc).
+			loc = getattr(program, "location", None)
+			path = getattr(loc, "path", None) if loc is not None else None
+			lineno = getattr(loc, "lineno", None) if loc is not None else None
+			if path and lineno:
+				try:
+					lines = Path(str(path)).read_text(encoding="utf-8", errors="replace").splitlines()
+					start = _find_program_in_file(lines, progname, start_at=max(int(lineno) - 1 - 5, 0))
+					if start is not None:
+						predoc = _extract_predoc_before_line(lines, start, doc_markers=markers)
+				except OSError:
+					pass
+
+		# Render program-level docs right under the title.
+		# Prefer only the pre-program doc block when available (prevents in-body docs
+		# from being rendered separately, which is especially important for FORD).
+		doc = predoc if predoc is not None else getattr(program, "doc", None)
+		_append_doc(section, doc, self.state)
+
+		if src:
+			_append_fortran_code_block(section, source=src)
+
+		deps = list(getattr(program, "dependencies", None) or [])
+		if not deps and src:
+			deps = _extract_use_dependencies_from_source(src)
+		_append_program_dependencies(section, dependencies=deps, state=self.state)
+
+		# Internal procedures (after `contains`) are optionally rendered after the program source.
+		if show_procedures and getattr(program, "procedures", None):
+			section += nodes.subtitle(text="Procedures")
+			for p in program.procedures:
+				kind = getattr(p, "kind", "procedure")
+				fullname = f"{progname}.{p.name}"
+				obj_anchor = _make_object_id(kind, fullname)
+				getattr(domain, "note_object")(name=p.name, objtype=kind, anchor=obj_anchor)
+				index["entries"].append(("single", f"{p.name} ({kind})", obj_anchor, "", None))
+
+				sub = nodes.section(ids=[obj_anchor])
+				sub += nodes.title(text=f"{kind.capitalize()} {p.name}")
+				_append_object_description(
+					sub,
+					domain="f",
+					objtype=str(kind),
+					name=str(p.name),
+					signature=getattr(p, "signature", None),
+					doc=getattr(p, "doc", None),
+					state=self.state,
+					args=getattr(p, "arguments", None),
+					result=getattr(p, "result", None),
+				)
+				section += sub
 
 		return [index, section]
 

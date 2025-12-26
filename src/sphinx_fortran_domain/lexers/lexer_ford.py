@@ -458,8 +458,46 @@ class FORDFortranLexer(FortranLexer):
             return
 
         if isinstance(item, FordProgram):
-            programs.setdefault(name, FortranProgramInfo(name=name, doc=doc, location=loc))
+            current = programs.get(name)
+            if current is None:
+                programs[name] = FortranProgramInfo(name=name, doc=doc, location=loc, dependencies=(), source=None)
+            else:
+                # Best-effort refresh doc/location if the existing entry is missing them.
+                if (current.doc is None and doc is not None) or (current.location is None and loc is not None):
+                    programs[name] = FortranProgramInfo(
+                        name=current.name,
+                        doc=doc if current.doc is None else current.doc,
+                        location=loc if current.location is None else current.location,
+                        dependencies=getattr(current, "dependencies", ()),
+                        procedures=getattr(current, "procedures", ()),
+                        source=getattr(current, "source", None),
+                    )
+
+            self._ingest_program_children(item, container_name=name, programs=programs)
             return
+
+    def _ingest_program_children(self, item: FordProgram, *, container_name: str, programs: Dict[str, FortranProgramInfo]) -> None:
+        current = programs.get(container_name)
+        if current is None:
+            return
+
+        procedures: List[FortranProcedure] = list(getattr(current, "procedures", []) or [])
+
+        # For internal procedures under a program's CONTAINS, FORD exposes them
+        # similarly to module procedures.
+        for f in getattr(item, "functions", []) or []:
+            procedures.append(self._convert_procedure(f, kind="function"))
+        for s in getattr(item, "subroutines", []) or []:
+            procedures.append(self._convert_procedure(s, kind="subroutine"))
+
+        programs[container_name] = FortranProgramInfo(
+            name=current.name,
+            doc=current.doc,
+            location=current.location,
+            dependencies=getattr(current, "dependencies", ()),
+            procedures=procedures,
+            source=getattr(current, "source", None),
+        )
 
     def _ingest_container_children(self, item: FordModule, *, container_name: str, modules: Dict[str, FortranModuleInfo]) -> None:
         current = modules.get(container_name)
