@@ -8,3 +8,4 @@ API Reference
 
    domain
    directives
+   lexers

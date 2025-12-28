@@ -81,6 +81,8 @@ See :f:mod:`example_module` and :f:subr:`normalize_vector`.
 
 ## Writing a lexer plugin
 
+See the full step-by-step guide in the documentation: ``docs/api/lexers.rst``.
+
 External packages can register a lexer at import/setup time:
 
 ```python
