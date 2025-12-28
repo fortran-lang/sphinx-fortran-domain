@@ -1,6 +1,8 @@
 # Sphinx Fortran Domain
 
-Lightweight Sphinx domain providing the *base* to document Fortran projects.
+Fortran-lang's base Sphinx domain to document Fortran projects.
+
+> **WARNING**: This project is under construction, at this stage you can use it but expect missing features or some rendering bugs. Your friendly feedback will be very important to get this project in shape.
 
 ## Install
 
