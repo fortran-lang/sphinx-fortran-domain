@@ -65,6 +65,7 @@ def _collect_fortran_files_from_env(env) -> list[str]:
 	confdir = Path(getattr(app, "confdir", os.getcwd()))
 	config = getattr(app, "config", None)
 	roots = _as_list(getattr(config, "fortran_sources", []))
+	excludes = _as_list(getattr(config, "fortran_sources_exclude", []))
 	exts = {e.lower() for e in _as_list(getattr(config, "fortran_file_extensions", []))}
 	if not roots:
 		return []
@@ -90,6 +91,41 @@ def _collect_fortran_files_from_env(env) -> list[str]:
 			continue
 		if p.is_file() and (not exts or p.suffix.lower() in exts):
 			files.append(str(p))
+
+	if excludes:
+		def _norm(s: str) -> str:
+			try:
+				return os.path.normcase(str(Path(s).resolve()))
+			except Exception:
+				return os.path.normcase(str(Path(s)))
+
+		exclude_files: set[str] = set()
+		for raw in excludes:
+			pat = str(raw)
+			if any(ch in pat for ch in "*?["):
+				pattern = str(confdir / pat)
+				for match in glob.glob(pattern, recursive=True):
+					p = Path(match)
+					if p.is_dir():
+						for child in p.rglob("*"):
+							if child.is_file() and (not exts or child.suffix.lower() in exts):
+								exclude_files.add(_norm(str(child)))
+					elif p.is_file() and (not exts or p.suffix.lower() in exts):
+						exclude_files.add(_norm(str(p)))
+				continue
+
+			p = Path(pat)
+			if not p.is_absolute():
+				p = confdir / p
+			if p.is_dir():
+				for child in p.rglob("*"):
+					if child.is_file() and (not exts or child.suffix.lower() in exts):
+						exclude_files.add(_norm(str(child)))
+			elif p.is_file() and (not exts or p.suffix.lower() in exts):
+				exclude_files.add(_norm(str(p)))
+
+		if exclude_files:
+			files = [f for f in files if _norm(f) not in exclude_files]
 
 	# Deterministic order
 	return sorted(set(files))

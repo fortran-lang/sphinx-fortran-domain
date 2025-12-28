@@ -158,6 +158,7 @@ def _doc_markers_from_config(app: Sphinx) -> List[str]:
 def _collect_fortran_files(app: Sphinx) -> List[str]:
 	exts = {e.lower() for e in _as_list(getattr(app.config, "fortran_file_extensions", []))}
 	roots = _as_list(getattr(app.config, "fortran_sources", []))
+	excludes = _as_list(getattr(app.config, "fortran_sources_exclude", []))
 	if not roots:
 		return []
 
@@ -182,6 +183,43 @@ def _collect_fortran_files(app: Sphinx) -> List[str]:
 		elif p.is_file():
 			if not exts or p.suffix.lower() in exts:
 				files.append(str(p))
+
+	if excludes:
+		def _norm(s: str) -> str:
+			try:
+				return os.path.normcase(str(Path(s).resolve()))
+			except Exception:
+				return os.path.normcase(str(Path(s)))
+
+		exclude_files: set[str] = set()
+		confdir = Path(app.confdir)
+		for raw in excludes:
+			pat = str(raw)
+			# Glob patterns
+			if any(ch in pat for ch in "*?["):
+				pattern = str(confdir / pat)
+				for match in glob.glob(pattern, recursive=True):
+					p = Path(match)
+					if p.is_dir():
+						for child in p.rglob("*"):
+							if child.is_file() and (not exts or child.suffix.lower() in exts):
+								exclude_files.add(_norm(str(child)))
+					elif p.is_file() and (not exts or p.suffix.lower() in exts):
+						exclude_files.add(_norm(str(p)))
+				continue
+
+			p = Path(pat)
+			if not p.is_absolute():
+				p = confdir / p
+			if p.is_dir():
+				for child in p.rglob("*"):
+					if child.is_file() and (not exts or child.suffix.lower() in exts):
+						exclude_files.add(_norm(str(child)))
+			elif p.is_file() and (not exts or p.suffix.lower() in exts):
+				exclude_files.add(_norm(str(p)))
+
+		if exclude_files:
+			files = [f for f in files if _norm(f) not in exclude_files]
 
 	# Deterministic order
 	return sorted(set(files))
@@ -224,6 +262,7 @@ def setup(app: Sphinx):
 	app.add_domain(FortranDomain)
 
 	app.add_config_value("fortran_sources", default=[], rebuild="env")
+	app.add_config_value("fortran_sources_exclude", default=[], rebuild="env")
 	app.add_config_value("fortran_lexer", default="regex", rebuild="env")
 	app.add_config_value("fortran_doc_chars", default=[">"], rebuild="env")
 	app.add_config_value(

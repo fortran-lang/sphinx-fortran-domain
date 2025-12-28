@@ -38,6 +38,13 @@ fortran_sources = [
 	"../example/*.f90",  # glob pattern
 ]
 
+# Exclude sources from parsing (directories, files, or glob patterns)
+fortran_sources_exclude = [
+	"../example/legacy",          # directory
+	"../example/skip_this.f90",   # file
+	"../example/**/generated_*.f90",  # glob
+]
+
 # Select a lexer (built-in: "regex")
 fortran_lexer = "regex"
 
