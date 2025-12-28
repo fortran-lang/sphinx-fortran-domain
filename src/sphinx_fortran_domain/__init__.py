@@ -13,7 +13,10 @@ from sphinx.util import logging
 
 from sphinx_fortran_domain.domain import FortranDomain
 from sphinx_fortran_domain.lexers import get_lexer, register_builtin_lexers
-from sphinx_fortran_domain.utils  import collect_fortran_source_files, _as_chars, _as_list
+from sphinx_fortran_domain.utils import (
+    collect_fortran_source_files_from_config, 
+	doc_markers_from_doc_chars
+)
 
 
 logger = logging.getLogger(__name__)
@@ -120,27 +123,14 @@ def _doc_markers_from_config(app: Sphinx) -> List[str]:
 	- The second character selects documentation (e.g. '>' for '!>')
 	"""
 
-	chars = _as_chars(getattr(app.config, "fortran_doc_chars", None))
-	if chars:
-		for c in chars:
-			if len(c) != 1:
-				raise SphinxError(f"fortran_doc_chars entries must be single characters, got: {c!r}")
-		return ["!" + c for c in chars]
-
-	# Default convention: !> doc lines
-	return ["!>"]
+	try:
+		return doc_markers_from_doc_chars(getattr(app.config, "fortran_doc_chars", None))
+	except ValueError as exc:
+		raise SphinxError(str(exc)) from exc
 
 
 def _collect_fortran_files(app: Sphinx) -> List[str]:
-	exts = {e.lower() for e in _as_list(getattr(app.config, "fortran_file_extensions", []))}
-	roots = _as_list(getattr(app.config, "fortran_sources", []))
-	excludes = _as_list(getattr(app.config, "fortran_sources_exclude", []))
-	return collect_fortran_source_files(
-		confdir=Path(app.confdir),
-		roots=roots,
-		extensions=exts,
-		excludes=excludes,
-	)
+	return collect_fortran_source_files_from_config(confdir=Path(app.confdir), config=app.config)
 
 
 def _load_symbols(app: Sphinx) -> None:

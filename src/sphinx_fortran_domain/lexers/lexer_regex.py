@@ -4,6 +4,13 @@ import re
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence
 
+from sphinx_fortran_domain.utils import (
+	find_inline_doc as _find_inline_doc,
+	is_doc_line as _is_doc_line,
+	read_lines_utf8,
+	strip_inline_comment as _strip_inline_comment,
+)
+
 from sphinx_fortran_domain.lexers import (
 	FortranArgument,
 	FortranComponent,
@@ -46,13 +53,6 @@ _RE_TYPE_PROC_BIND = re.compile(
 )
 _RE_END_PROC = re.compile(r"^\s*end\s*(subroutine|function)\b", re.IGNORECASE)
 _RE_RESULT = re.compile(r"\bresult\s*\(\s*([A-Za-z_]\w*)\s*\)", re.IGNORECASE)
-
-
-def _strip_inline_comment(line: str) -> str:
-	if "!" not in line:
-		return line
-	# Keep it simple: stop at the first '!' (not trying to handle strings).
-	return line.split("!", 1)[0]
 
 
 def _match_proc(line: str) -> Optional[tuple[str, str, list[str], str]]:
@@ -184,26 +184,6 @@ def _normalize_proc_signature(raw: str) -> str:
 	return s
 
 
-def _find_inline_doc(line: str, doc_markers: Sequence[str]) -> Optional[tuple[int, str]]:
-	best: Optional[tuple[int, str]] = None
-	for m in doc_markers:
-		if not m:
-			continue
-		# Inline docs live in Fortran comments (introduced by '!').
-		# Ignore markers that don't include '!' so we don't mis-detect operators like `=>`.
-		if "!" not in m:
-			continue
-		pos = line.find(m)
-		if pos == -1:
-			continue
-		if line[:pos].strip() == "":
-			# Leading marker is handled by _is_doc_line.
-			continue
-		if best is None or pos < best[0]:
-			best = (pos, m)
-	return best
-
-
 def _match_interface(line: str) -> Optional[str]:
 	code = _strip_inline_comment(line)
 	low = code.lower().strip()
@@ -214,15 +194,6 @@ def _match_interface(line: str) -> Optional[str]:
 		return None
 	return m.group(1)
 
-
-def _is_doc_line(line: str, doc_markers: Sequence[str]) -> Optional[str]:
-	stripped = line.lstrip()
-	for marker in doc_markers:
-		if stripped.startswith(marker):
-			return stripped[len(marker) :].lstrip(" \t")
-	return None
-
-
 class RegexFortranLexer(FortranLexer):
 	name = "regex"
 
@@ -232,8 +203,7 @@ class RegexFortranLexer(FortranLexer):
 		programs: Dict[str, FortranProgramInfo] = {}
 
 		for path in file_paths:
-			with open(path, "r", encoding="utf-8", errors="replace") as handle:
-				lines = handle.read().splitlines()
+			lines = read_lines_utf8(path)
 			self._parse_file(
 				path,
 				lines,

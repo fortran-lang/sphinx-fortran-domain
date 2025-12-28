@@ -12,34 +12,30 @@ from sphinx import addnodes
 from sphinx.directives import ObjectDescription
 from sphinx.util.parsing import nested_parse_to_nodes
 
-from sphinx_fortran_domain.utils import collect_fortran_source_files, _as_list
+from sphinx_fortran_domain.utils import (
+	collect_fortran_source_files_from_config,
+	doc_markers_from_doc_chars,
+	extract_predoc_before_line,
+	extract_use_dependencies,
+	read_lines_utf8,
+	read_text_utf8,
+)
 
 
 _RE_DOC_SECTION = re.compile(r"^\s*##\s+(?P<title>\S.*?\S)\s*$")
 _RE_FOOTNOTE_DEF = re.compile(r"^\s*\.\.\s*\[(?P<label>\d+|#)\]\s+")
 _RE_END_PROGRAM = re.compile(r"^\s*end\s*program\b", re.IGNORECASE)
-_RE_CONTAINS = re.compile(r"^\s*contains\b", re.IGNORECASE)
-_RE_USE = re.compile(
-	r"^\s*use\b\s*(?:,\s*(?:non_intrinsic|intrinsic)\s*)?(?:\s*::\s*)?([A-Za-z_]\w*)\b",
-	re.IGNORECASE,
-)
 
 
 def _doc_markers_from_env(env) -> list[str]:
 	"""Return configured Fortran doc markers (e.g. ['!>'])."""
-	chars = getattr(getattr(env, "app", None), "config", None)
-	chars = getattr(chars, "fortran_doc_chars", None)
-	markers: list[str] = []
-	if chars is not None:
-		if isinstance(chars, str):
-			chars_list = [c for c in chars if c.strip()]
-		else:
-			chars_list = [str(c) for c in (chars or [])]
-		chars_list = [c for c in chars_list if c]
-		if chars_list:
-			markers = ["!" + c for c in chars_list]
-
-	return markers or ["!>"]
+	app = getattr(env, "app", None)
+	config = getattr(app, "config", None) if app is not None else None
+	try:
+		return doc_markers_from_doc_chars(getattr(config, "fortran_doc_chars", None))
+	except Exception:
+		# Keep directives resilient even if config is malformed.
+		return ["!>"]
 
 
 def _collect_fortran_files_from_env(env) -> list[str]:
@@ -48,15 +44,7 @@ def _collect_fortran_files_from_env(env) -> list[str]:
 		return []
 	confdir = Path(getattr(app, "confdir", os.getcwd()))
 	config = getattr(app, "config", None)
-	roots = _as_list(getattr(config, "fortran_sources", []))
-	excludes = _as_list(getattr(config, "fortran_sources_exclude", []))
-	exts = {e.lower() for e in _as_list(getattr(config, "fortran_file_extensions", []))}
-	return collect_fortran_source_files(
-		confdir=confdir,
-		roots=roots,
-		extensions=exts,
-		excludes=excludes,
-	)
+	return collect_fortran_source_files_from_config(confdir=confdir, config=config)
 
 
 def _find_program_in_file(lines: list[str], progname: str, *, start_at: int = 0) -> int | None:
@@ -65,45 +53,6 @@ def _find_program_in_file(lines: list[str], progname: str, *, start_at: int = 0)
 		if pat.match(lines[i]):
 			return i
 	return None
-
-
-def _extract_predoc_before_line(lines: list[str], idx: int, *, doc_markers: list[str]) -> str | None:
-	if idx <= 0:
-		return None
-	markers = [m for m in (doc_markers or []) if m and m.strip()]
-	buf: list[str] = []
-	i = idx - 1
-	while i >= 0:
-		line = lines[i]
-		stripped = line.lstrip()
-		marker = next((m for m in markers if stripped.startswith(m)), None)
-		if marker is None:
-			break
-		buf.append(stripped[len(marker) :].lstrip(" \t").rstrip())
-		i -= 1
-	if not buf:
-		return None
-	buf.reverse()
-	text = "\n".join(buf).strip()
-	return text or None
-
-
-def _extract_use_dependencies_from_source(source: str) -> list[str]:
-	deps: list[str] = []
-	seen: set[str] = set()
-	for raw in (source or "").splitlines():
-		if _RE_CONTAINS.match(raw) or _RE_END_PROGRAM.match(raw):
-			break
-		code = raw.split("!", 1)[0]
-		m = _RE_USE.match(code)
-		if not m:
-			continue
-		name = (m.group(1) or "").strip()
-		key = name.lower()
-		if name and key not in seen:
-			seen.add(key)
-			deps.append(name)
-	return deps
 
 
 def _read_program_source_by_search(env, progname: str, *, doc_markers: list[str]) -> tuple[str | None, str | None]:
@@ -118,7 +67,7 @@ def _read_program_source_by_search(env, progname: str, *, doc_markers: list[str]
 
 	for path in files:
 		try:
-			text = Path(path).read_text(encoding="utf-8", errors="replace")
+			text = read_text_utf8(path)
 		except OSError:
 			continue
 		lines = text.splitlines()
@@ -126,7 +75,7 @@ def _read_program_source_by_search(env, progname: str, *, doc_markers: list[str]
 		if start is None:
 			continue
 
-		predoc = _extract_predoc_before_line(lines, start, doc_markers=doc_markers)
+		predoc = extract_predoc_before_line(lines, start, doc_markers=doc_markers)
 		buf: list[str] = []
 		for i in range(start, len(lines)):
 			buf.append(lines[i])
@@ -297,8 +246,7 @@ def _read_program_source_from_location(location) -> str | None:
 	if not path or not lineno:
 		return None
 	try:
-		with open(path, "r", encoding="utf-8", errors="replace") as f:
-			lines = f.read().splitlines()
+		lines = read_lines_utf8(path)
 	except OSError:
 		return None
 
@@ -659,7 +607,7 @@ class FortranProgram(Directive):
 					lines = Path(str(path)).read_text(encoding="utf-8", errors="replace").splitlines()
 					start = _find_program_in_file(lines, progname, start_at=max(int(lineno) - 1 - 5, 0))
 					if start is not None:
-						predoc = _extract_predoc_before_line(lines, start, doc_markers=markers)
+						predoc = extract_predoc_before_line(lines, start, doc_markers=markers)
 				except OSError:
 					pass
 
@@ -674,7 +622,7 @@ class FortranProgram(Directive):
 
 		deps = list(getattr(program, "dependencies", None) or [])
 		if not deps and src:
-			deps = _extract_use_dependencies_from_source(src)
+			deps = extract_use_dependencies(src)
 		_append_program_dependencies(section, dependencies=deps, state=self.state)
 
 		# Internal procedures (after `contains`) are optionally rendered after the program source.
