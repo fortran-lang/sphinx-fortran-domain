@@ -21,7 +21,7 @@ setup(
         "docs": [
             "myst-parser",
             "pydata-sphinx-theme",
-        ]
+        ],
         "test": [
             "pytest>=7",
         ],
