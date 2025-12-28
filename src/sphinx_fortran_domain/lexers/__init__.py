@@ -174,10 +174,5 @@ def register_builtin_lexers() -> None:
 	if "ford" not in _LEXER_REGISTRY:
 		_safe_register_builtin("ford", "sphinx_fortran_domain.lexers.lexer_ford", "FORDFortranLexer")
 
-	if "fparser2" not in _LEXER_REGISTRY:
-		_safe_register_builtin(
-			"fparser2", "sphinx_fortran_domain.lexers.lexer_fparser2", "Fparser2FortranLexer"
-		)
-
 	if "lfortran" not in _LEXER_REGISTRY:
 		_safe_register_builtin("lfortran", "sphinx_fortran_domain.lexers.lexer_lfortran", "LFortranLexer")

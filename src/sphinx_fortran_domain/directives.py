@@ -323,54 +323,6 @@ def _append_doc(section: nodes.Element, doc: str | None, state) -> None:
 
 	section += container
 
-def _split_literate_fortran_source(source: str, *, doc_markers: list[str]) -> list[tuple[str, str]]:
-	"""Split Fortran source into blocks: ('doc'|'code', text).
-
-	Lines starting with a configured doc marker (e.g. '!>') become 'doc' blocks;
-	other lines become 'code' blocks. The intent is a small literate-programming view
-	for programs.
-	"""
-	if not source:
-		return []
-
-	markers = [m for m in (doc_markers or []) if m and m.strip()]
-	lines = str(source).splitlines()
-	out: list[tuple[str, list[str]]] = []
-	cur_kind: str | None = None
-	cur: list[str] = []
-
-	def flush() -> None:
-		nonlocal cur_kind, cur
-		if cur_kind is None:
-			return
-		text = "\n".join(cur).rstrip()
-		if text.strip() != "":
-			out.append((cur_kind, cur))
-		cur_kind = None
-		cur = []
-
-	for line in lines:
-		stripped = line.lstrip()
-		marker = next((m for m in markers if stripped.startswith(m)), None)
-		if marker is not None:
-			# Doc line.
-			if cur_kind != "doc":
-				flush()
-				cur_kind = "doc"
-			text = stripped[len(marker) :].lstrip(" \t")
-			cur.append(text)
-			continue
-
-		# Code line.
-		if cur_kind != "code":
-			flush()
-			cur_kind = "code"
-		cur.append(line)
-
-	flush()
-	# Normalize to flat tuples.
-	return [(k, "\n".join(v).rstrip() + "\n") for (k, v) in out]
-
 
 def _read_program_source_from_location(location) -> str | None:
 	"""Best-effort read of a program unit source from its file location."""

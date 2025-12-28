@@ -229,7 +229,7 @@ def _var_decl_from_ford(var: object) -> Optional[str]:
 
 
 def _proc_signature_from_ford(proc: object) -> Optional[str]:
-    # Try to build a readable signature.
+    # build a readable signature.
     name = getattr(proc, "name", None)
     if not name:
         return None

@@ -140,7 +140,7 @@ class FortranDomain(Domain):
         node: addnodes.pending_xref,
         contnode: nodes.Element,
     ) -> Optional[nodes.Element]:
-        """Resolve a cross-reference for a Fortran object."""
+        """Resolve cross-reference for a Fortran object."""
         objects_by_type: Dict[str, Dict[str, FortranObjectEntry]] = self.data.get("objects", {})
         objtype = self._role_to_objtype.get(typ)
         if not objtype:
