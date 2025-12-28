@@ -12,7 +12,7 @@ from sphinx import addnodes
 from sphinx.directives import ObjectDescription
 from sphinx.util.parsing import nested_parse_to_nodes
 
-from sphinx_fortran_domain._utils import collect_fortran_source_files, _as_list
+from sphinx_fortran_domain.utils import collect_fortran_source_files, _as_list
 
 
 _RE_DOC_SECTION = re.compile(r"^\s*##\s+(?P<title>\S.*?\S)\s*$")

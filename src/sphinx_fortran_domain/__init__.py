@@ -13,7 +13,7 @@ from sphinx.util import logging
 
 from sphinx_fortran_domain.domain import FortranDomain
 from sphinx_fortran_domain.lexers import get_lexer, register_builtin_lexers
-from sphinx_fortran_domain._utils import collect_fortran_source_files, _as_chars, _as_list
+from sphinx_fortran_domain.utils  import collect_fortran_source_files, _as_chars, _as_list
 
 
 logger = logging.getLogger(__name__)
