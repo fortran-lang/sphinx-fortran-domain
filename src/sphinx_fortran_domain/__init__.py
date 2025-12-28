@@ -127,12 +127,6 @@ def _doc_markers_from_config(app: Sphinx) -> List[str]:
 				raise SphinxError(f"fortran_doc_chars entries must be single characters, got: {c!r}")
 		return ["!" + c for c in chars]
 
-	# Backward-compatible alias.
-	markers = _as_list(getattr(app.config, "fortran_doc_markers", []))
-	markers = [m for m in markers if m]
-	if markers:
-		return markers
-
 	# Default convention: !> doc lines
 	return ["!>"]
 

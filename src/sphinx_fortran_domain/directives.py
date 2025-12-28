@@ -39,15 +39,6 @@ def _doc_markers_from_env(env) -> list[str]:
 		if chars_list:
 			markers = ["!" + c for c in chars_list]
 
-	if not markers:
-		cfg = getattr(getattr(env, "app", None), "config", None)
-		m = getattr(cfg, "fortran_doc_markers", None)
-		if isinstance(m, str):
-			markers = [m]
-		else:
-			markers = [str(x) for x in (m or [])]
-		markers = [x for x in markers if x]
-
 	return markers or ["!>"]
 
 
