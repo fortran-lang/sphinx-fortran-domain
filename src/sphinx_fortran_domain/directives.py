@@ -519,7 +519,7 @@ def _append_component_docs(section: nodes.Element, components, state) -> None:
 		item += definition
 		dl += item
 
-	section += _field_list("Members", dl)
+	section += _field_list("Attributes", dl)
 
 
 def _find_proc_by_name(procedures, name: str):
