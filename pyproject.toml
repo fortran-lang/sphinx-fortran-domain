@@ -13,6 +13,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+docs = [
+	"myst-parser",
+	"pydata-sphinx-theme",
+]
 test = [
 	"pytest>=7",
 ]

@@ -18,6 +18,10 @@ setup(
         "Sphinx>=6",
     ],
     extras_require={
+        "docs": [
+            "myst-parser",
+            "pydata-sphinx-theme",
+        ]
         "test": [
             "pytest>=7",
         ],

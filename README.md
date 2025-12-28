@@ -10,6 +10,19 @@ Editable install for development:
 
 `pip install -e .`
 
+## Build the docs
+
+Install with documentation dependencies:
+
+`pip install -e ".[docs]"`
+
+Build HTML documentation:
+
+```
+cd docs
+make html
+```
+
 ## Enable the extension
 
 In `conf.py`:
