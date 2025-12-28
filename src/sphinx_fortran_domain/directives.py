@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import glob
 import os
 import re
 from pathlib import Path
@@ -13,6 +12,8 @@ from sphinx import addnodes
 from sphinx.directives import ObjectDescription
 from sphinx.util.parsing import nested_parse_to_nodes
 
+from sphinx_fortran_domain._utils import collect_fortran_source_files, _as_list
+
 
 _RE_DOC_SECTION = re.compile(r"^\s*##\s+(?P<title>\S.*?\S)\s*$")
 _RE_FOOTNOTE_DEF = re.compile(r"^\s*\.\.\s*\[(?P<label>\d+|#)\]\s+")
@@ -22,14 +23,6 @@ _RE_USE = re.compile(
 	r"^\s*use\b\s*(?:,\s*(?:non_intrinsic|intrinsic)\s*)?(?:\s*::\s*)?([A-Za-z_]\w*)\b",
 	re.IGNORECASE,
 )
-
-
-def _as_list(value) -> list[str]:
-	if value is None:
-		return []
-	if isinstance(value, str):
-		return [value]
-	return [str(v) for v in value]
 
 
 def _doc_markers_from_env(env) -> list[str]:
@@ -67,68 +60,12 @@ def _collect_fortran_files_from_env(env) -> list[str]:
 	roots = _as_list(getattr(config, "fortran_sources", []))
 	excludes = _as_list(getattr(config, "fortran_sources_exclude", []))
 	exts = {e.lower() for e in _as_list(getattr(config, "fortran_file_extensions", []))}
-	if not roots:
-		return []
-
-	files: list[str] = []
-	for root in roots:
-		root = str(root)
-		if any(ch in root for ch in "*?["):
-			pattern = str(confdir / root)
-			for match in glob.glob(pattern, recursive=True):
-				p = Path(match)
-				if p.is_file() and (not exts or p.suffix.lower() in exts):
-					files.append(str(p))
-			continue
-
-		p = Path(root)
-		if not p.is_absolute():
-			p = confdir / p
-		if p.is_dir():
-			for child in p.rglob("*"):
-				if child.is_file() and (not exts or child.suffix.lower() in exts):
-					files.append(str(child))
-			continue
-		if p.is_file() and (not exts or p.suffix.lower() in exts):
-			files.append(str(p))
-
-	if excludes:
-		def _norm(s: str) -> str:
-			try:
-				return os.path.normcase(str(Path(s).resolve()))
-			except Exception:
-				return os.path.normcase(str(Path(s)))
-
-		exclude_files: set[str] = set()
-		for raw in excludes:
-			pat = str(raw)
-			if any(ch in pat for ch in "*?["):
-				pattern = str(confdir / pat)
-				for match in glob.glob(pattern, recursive=True):
-					p = Path(match)
-					if p.is_dir():
-						for child in p.rglob("*"):
-							if child.is_file() and (not exts or child.suffix.lower() in exts):
-								exclude_files.add(_norm(str(child)))
-					elif p.is_file() and (not exts or p.suffix.lower() in exts):
-						exclude_files.add(_norm(str(p)))
-				continue
-
-			p = Path(pat)
-			if not p.is_absolute():
-				p = confdir / p
-			if p.is_dir():
-				for child in p.rglob("*"):
-					if child.is_file() and (not exts or child.suffix.lower() in exts):
-						exclude_files.add(_norm(str(child)))
-			elif p.is_file() and (not exts or p.suffix.lower() in exts):
-				exclude_files.add(_norm(str(p)))
-
-		if exclude_files:
-			files = [f for f in files if _norm(f) not in exclude_files]
-
-	# Deterministic order
-	return sorted(set(files))
+	return collect_fortran_source_files(
+		confdir=confdir,
+		roots=roots,
+		extensions=exts,
+		excludes=excludes,
+	)
 
 
 def _find_program_in_file(lines: list[str], progname: str, *, start_at: int = 0) -> int | None:

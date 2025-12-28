@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from importlib import metadata
 from pathlib import Path
-import glob
 import hashlib
 import json
 import os
@@ -14,6 +13,7 @@ from sphinx.util import logging
 
 from sphinx_fortran_domain.domain import FortranDomain
 from sphinx_fortran_domain.lexers import get_lexer, register_builtin_lexers
+from sphinx_fortran_domain._utils import collect_fortran_source_files, _as_chars, _as_list
 
 
 logger = logging.getLogger(__name__)
@@ -112,24 +112,6 @@ def _maybe_force_reread(app: Sphinx, env, added, changed, removed):
 	return []
 
 
-def _as_list(value) -> List[str]:
-	if value is None:
-		return []
-	if isinstance(value, str):
-		return [value]
-	return [str(v) for v in value]
-
-
-def _as_chars(value) -> List[str]:
-	"""Normalize a config value into a list of single-character strings."""
-	if value is None:
-		return []
-	if isinstance(value, str):
-		# Allow ">!@" style strings.
-		return [c for c in value if c.strip()]
-	return [str(v) for v in value]
-
-
 def _doc_markers_from_config(app: Sphinx) -> List[str]:
 	"""Return list of 2-character doc markers.
 
@@ -159,70 +141,12 @@ def _collect_fortran_files(app: Sphinx) -> List[str]:
 	exts = {e.lower() for e in _as_list(getattr(app.config, "fortran_file_extensions", []))}
 	roots = _as_list(getattr(app.config, "fortran_sources", []))
 	excludes = _as_list(getattr(app.config, "fortran_sources_exclude", []))
-	if not roots:
-		return []
-
-	files: List[str] = []
-	for root in roots:
-		if any(ch in root for ch in "*?["):
-			pattern = str((Path(app.confdir) / root))
-			for match in glob.glob(pattern, recursive=True):
-				p = Path(match)
-				if p.is_file() and (not exts or p.suffix.lower() in exts):
-					files.append(str(p))
-			continue
-
-		p = Path(root)
-		if not p.is_absolute():
-			p = Path(app.confdir) / p
-
-		if p.is_dir():
-			for child in p.rglob("*"):
-				if child.is_file() and (not exts or child.suffix.lower() in exts):
-					files.append(str(child))
-		elif p.is_file():
-			if not exts or p.suffix.lower() in exts:
-				files.append(str(p))
-
-	if excludes:
-		def _norm(s: str) -> str:
-			try:
-				return os.path.normcase(str(Path(s).resolve()))
-			except Exception:
-				return os.path.normcase(str(Path(s)))
-
-		exclude_files: set[str] = set()
-		confdir = Path(app.confdir)
-		for raw in excludes:
-			pat = str(raw)
-			# Glob patterns
-			if any(ch in pat for ch in "*?["):
-				pattern = str(confdir / pat)
-				for match in glob.glob(pattern, recursive=True):
-					p = Path(match)
-					if p.is_dir():
-						for child in p.rglob("*"):
-							if child.is_file() and (not exts or child.suffix.lower() in exts):
-								exclude_files.add(_norm(str(child)))
-					elif p.is_file() and (not exts or p.suffix.lower() in exts):
-						exclude_files.add(_norm(str(p)))
-				continue
-
-			p = Path(pat)
-			if not p.is_absolute():
-				p = confdir / p
-			if p.is_dir():
-				for child in p.rglob("*"):
-					if child.is_file() and (not exts or child.suffix.lower() in exts):
-						exclude_files.add(_norm(str(child)))
-			elif p.is_file() and (not exts or p.suffix.lower() in exts):
-				exclude_files.add(_norm(str(p)))
-
-		if exclude_files:
-			files = [f for f in files if _norm(f) not in exclude_files]
-
-	# Deterministic order
-	return sorted(set(files))
+	return collect_fortran_source_files(
+		confdir=Path(app.confdir),
+		roots=roots,
+		extensions=exts,
+		excludes=excludes,
+	)
 
 
 def _load_symbols(app: Sphinx) -> None:
