@@ -8,7 +8,7 @@ from typing import Callable, Dict, Iterable, List, Mapping, MutableMapping, Opti
 @dataclass(frozen=True)
 class SourceLocation:
 	path: str
-	lineno: int
+	lineno: int # 1-based line number in the original source file 
 
 
 @dataclass(frozen=True)
