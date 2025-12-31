@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from sphinx_fortran_domain.directives import (
     _preprocess_fortran_docstring,
-    _split_out_examples_sections,
+    _split_out_doc_section_blocks,
 )
 
 
@@ -67,8 +67,10 @@ More text.
     assert ".. rubric:: Notes" in out
 
 
-def test_split_out_examples_sections_moves_examples_to_end() -> None:
+def test_split_out_doc_section_blocks_includes_examples_in_sections() -> None:
     text = """Summary
+
+Intro paragraph.
 
 ## Examples
 >>> call foo(a)
@@ -77,54 +79,38 @@ def test_split_out_examples_sections_moves_examples_to_end() -> None:
 Something important.
 """
 
-    main, examples = _split_out_examples_sections(text)
-    assert main and "## Examples" not in main
-    assert "## Notes" in main
-    assert examples and "## Examples" in examples
+    preamble, sections = _split_out_doc_section_blocks(text)
+    assert preamble and "## Examples" not in preamble
+    assert sections and "## Examples" in sections
+    assert sections and "## Notes" in sections
 
 
-def test_split_out_examples_sections_keeps_non_examples_in_place() -> None:
-    text = """## Notes
-Text.
-"""
-    main, examples = _split_out_examples_sections(text)
-    assert main == text.strip()
-    assert examples is None
+def test_split_out_doc_section_blocks_splits_preamble_from_sections() -> None:
+    text = """Short summary line.
 
-
-def test_split_out_examples_sections_keeps_fenced_blocks_in_place() -> None:
-    text = """Summary
-
-```fortran
-print *, 'hello'
-```
+More details.
 
 ## Notes
-More text.
+Some notes.
+
+## References
+- A
 """
 
-    main, examples = _split_out_examples_sections(text)
-    assert main and "```fortran" in main
-    assert "## Notes" in main
-    assert examples is None
+    preamble, sections = _split_out_doc_section_blocks(text)
+    assert preamble and "Short summary" in preamble
+    assert preamble and "## Notes" not in preamble
+    assert sections and sections.lstrip().startswith("## Notes")
+    assert sections and "## References" in sections
 
 
-def test_split_out_examples_sections_moves_examples_section_with_fences() -> None:
-    text = """Summary
+def test_split_out_doc_section_blocks_no_sections_returns_all_preamble() -> None:
+    text = """Just prose.
 
-## Examples
-```fortran
-print *, 'hello'
-```
-
-## Notes
-More text.
+No explicit sections.
 """
-
-    main, examples = _split_out_examples_sections(text)
-    assert main and "## Examples" not in main
-    assert "## Notes" in main
-    assert examples and "## Examples" in examples
-    assert "```fortran" in examples
+    preamble, sections = _split_out_doc_section_blocks(text)
+    assert preamble == text.strip()
+    assert sections is None
 
 
