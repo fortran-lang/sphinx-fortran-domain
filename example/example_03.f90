@@ -192,6 +192,11 @@ contains
     end function matrix_determinant
     
     !> Calculate matrix inverse (type-bound procedure)  
+    !>
+    !> ## See Also
+    !> :f:func:`matrix_determinant` : some comment here.
+    !> :f:func:`matrix_multiply`, :f:func:`matrix_transpose`
+    !>
     pure function matrix_inverse(this) result(inv)
         !> Matrix instance
         class(matrix_type), intent(in) :: this

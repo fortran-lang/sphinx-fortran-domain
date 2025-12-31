@@ -147,6 +147,47 @@ def _preprocess_fortran_docstring(text: str) -> str:
 		m = _RE_DOC_SECTION.match(line)
 		if m:
 			title = m.group("title")
+			normalized = (title or "").strip().lower()
+
+			# Match NumpyDoc-style rendering for "See Also" by emitting a real
+			# Sphinx seealso directive (renders as an admonition with special styling).
+			if normalized in {"see also", "seealso"}:
+				if out and out[-1].strip() != "":
+					out.append("")
+				out.append(".. seealso::")
+				out.append("")
+				i += 1
+
+				# Consume the See Also body until the next "##" section marker.
+				# Support a lightweight "term : description" syntax (with spaces
+				# around the colon) to produce a definition-list style layout.
+				while i < len(lines) and not _RE_DOC_SECTION.match(lines[i]):
+					body_line = lines[i]
+					if not body_line.strip():
+						out.append("")
+						i += 1
+						continue
+
+					# Split only on " : " (spaces required) so domain roles like
+					# ":f:func:`name`" are not misinterpreted.
+					parts = re.split(r"\s+:\s+", body_line.strip(), maxsplit=1)
+					if len(parts) == 2:
+						term, desc = parts
+						out.append("   " + term.strip())
+						out.append("      " + desc.strip())
+						out.append("")
+					else:
+						out.append("   " + body_line.strip())
+						i += 1
+						continue
+					i += 1
+
+				# Avoid accumulating extra blank lines at the end of the directive.
+				while out and out[-1] == "":
+					out.pop()
+				out.append("")
+				continue
+
 			if out and out[-1].strip() != "":
 				out.append("")
 			out.append(f".. rubric:: {title}")

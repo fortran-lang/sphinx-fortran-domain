@@ -45,6 +45,28 @@ Cite the relevant literature, e.g. [1]_.
     assert "e.g. [1]_.\n\n.. [1]" in out
 
 
+def test_preprocess_see_also_to_seealso_directive() -> None:
+    text = """Summary
+
+## See Also
+:f:func:`matrix_determinant`
+:f:func:`matrix_multiply`, :f:func:`matrix_transpose`
+:f:func:`vector_add` : Related vector operation.
+
+## Notes
+More text.
+"""
+
+    out = _preprocess_fortran_docstring(text)
+    assert ".. seealso::" in out
+    assert ".. rubric:: See Also" not in out
+    assert "   :f:func:`matrix_determinant`" in out
+    assert "   :f:func:`matrix_multiply`, :f:func:`matrix_transpose`" in out
+    assert "   :f:func:`vector_add`" in out
+    assert "      Related vector operation." in out
+    assert ".. rubric:: Notes" in out
+
+
 def test_split_out_examples_sections_moves_examples_to_end() -> None:
     text = """Summary
 
