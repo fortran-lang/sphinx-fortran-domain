@@ -46,6 +46,7 @@ fortran_sources = [
 
 html_theme = 'pydata_sphinx_theme'
 html_static_path = ['_static']
+html_logo = "_static/images/logo.png"
 
 # Keep the top-left navbar title concise.
 html_title = f"{project} {release}"

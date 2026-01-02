@@ -1,0 +1,1 @@
+The "Sphinx Fortran Domain" logo is a derivative of the official Fortran logo, which is Copyright (c) Fortran-lang community and licensed under the MIT License. This derived version was generated with the assistance of the Google Gemini AI.
