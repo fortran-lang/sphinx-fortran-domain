@@ -102,11 +102,11 @@ master_doc = "index"
 
 	# Sanity check: the module page should have rendered.
 	index_html = (out_dir / "index.html").read_text(encoding="utf-8", errors="replace")
-	assert "Module mymod" in index_html
+	assert "mymod (module)" in index_html
 	assert "This is a test module" in index_html
 	# Our module should include a type and a procedure.
-	assert "Type vec" in index_html
+	assert "vec (type)" in index_html
 	assert "x" in index_html
 	assert "x component docs" in index_html.lower()
-	assert "Function add_one" in index_html
+	assert "add_one (function)" in index_html
 	assert "Add one to x" in index_html

@@ -524,7 +524,7 @@ def _append_object_description(
 	signode = addnodes.desc_signature()
 	# Keep signature rendering simple and stable: show the parsed signature text
 	# as a literal inside the signature node.
-	text = signature if signature else f"{objtype} {name}"
+	text = signature if signature else f"{name} ({objtype})"
 	signode += nodes.literal(text=str(text))
 	desc += signode
 
@@ -609,7 +609,7 @@ class FortranProgram(Directive):
 		anchor = nodes.make_id(f"f-program-{progname}")
 		index = addnodes.index(entries=[("single", f"{progname} (program)", anchor, "", None)])
 		section = nodes.section(ids=[anchor])
-		section += nodes.title(text=f"Program {progname}")
+		section += nodes.title(text=f"{progname} (program)")
 		getattr(domain, "note_object")(name=progname, objtype="program", anchor=anchor)
 
 		if program is None:
@@ -661,7 +661,7 @@ class FortranProgram(Directive):
 				index["entries"].append(("single", f"{p.name} ({kind})", obj_anchor, "", None))
 
 				sub = nodes.section(ids=[obj_anchor])
-				sub += nodes.title(text=f"{kind.capitalize()} {p.name}")
+				sub += nodes.title(text=f"{p.name} ({kind})")
 				_append_object_description(
 					sub,
 					domain="f",
@@ -690,7 +690,7 @@ class FortranModule(Directive):
 		anchor = nodes.make_id(f"f-module-{modname}")
 		index = addnodes.index(entries=[("single", f"{modname} (module)", anchor, "", None)])
 		section = nodes.section(ids=[anchor])
-		section += nodes.title(text=f"Module {modname}")
+		section += nodes.title(text=f"{modname} (module)")
 		getattr(domain, "note_object")(name=modname, objtype="module", anchor=anchor)
 
 		if module is None:
@@ -707,7 +707,7 @@ class FortranModule(Directive):
 				index["entries"].append(("single", f"{t.name} (type)", obj_anchor, "", None))
 
 				sub = nodes.section(ids=[obj_anchor])
-				sub += nodes.title(text=f"Type {t.name}")
+				sub += nodes.title(text=f"{t.name} (type)")
 				_append_object_description(
 					sub,
 					domain="f",
@@ -732,7 +732,7 @@ class FortranModule(Directive):
 				index["entries"].append(("single", f"{p.name} ({kind})", obj_anchor, "", None))
 
 				sub = nodes.section(ids=[obj_anchor])
-				sub += nodes.title(text=f"{kind.capitalize()} {p.name}")
+				sub += nodes.title(text=f"{p.name} ({kind})")
 				_append_object_description(
 					sub,
 					domain="f",
@@ -755,7 +755,7 @@ class FortranModule(Directive):
 				index["entries"].append(("single", f"{g.name} (interface)", obj_anchor, "", None))
 
 				sub = nodes.section(ids=[obj_anchor])
-				sub += nodes.title(text=f"Interface {g.name}")
+				sub += nodes.title(text=f"{g.name} (interface)")
 				_append_doc(sub, getattr(g, "doc", None), self.state)
 				section += sub
 
@@ -773,7 +773,7 @@ class FortranSubmodule(Directive):
 		anchor = nodes.make_id(f"f-submodule-{submodname}")
 		index = addnodes.index(entries=[("single", f"{submodname} (submodule)", anchor, "", None)])
 		section = nodes.section(ids=[anchor])
-		section += nodes.title(text=f"Submodule {submodname}")
+		section += nodes.title(text=f"{submodname} (submodule)")
 		getattr(domain, "note_object")(name=submodname, objtype="submodule", anchor=anchor)
 
 		if submodule is None:
@@ -790,7 +790,7 @@ class FortranSubmodule(Directive):
 				index["entries"].append(("single", f"{t.name} (type)", obj_anchor, "", None))
 
 				sub = nodes.section(ids=[obj_anchor])
-				sub += nodes.title(text=f"Type {t.name}")
+				sub += nodes.title(text=f"{t.name} (type)")
 				_append_object_description(
 					sub,
 					domain="f",
@@ -815,7 +815,7 @@ class FortranSubmodule(Directive):
 				index["entries"].append(("single", f"{p.name} ({kind})", obj_anchor, "", None))
 
 				sub = nodes.section(ids=[obj_anchor])
-				sub += nodes.title(text=f"{kind.capitalize()} {p.name}")
+				sub += nodes.title(text=f"{p.name} ({kind})")
 				_append_object_description(
 					sub,
 					domain="f",
@@ -838,7 +838,7 @@ class FortranSubmodule(Directive):
 				index["entries"].append(("single", f"{g.name} (interface)", obj_anchor, "", None))
 
 				sub = nodes.section(ids=[obj_anchor])
-				sub += nodes.title(text=f"Interface {g.name}")
+				sub += nodes.title(text=f"{g.name} (interface)")
 				_append_doc(sub, getattr(g, "doc", None), self.state)
 				section += sub
 
