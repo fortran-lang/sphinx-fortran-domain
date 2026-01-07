@@ -592,6 +592,7 @@ class FortranProgram(Directive):
 	option_spec = {
 		"procedures": rst_directives.flag,
 		"no-procedures": rst_directives.flag,
+		"no-show-code": rst_directives.flag,
 	}
 
 	def run(self):
@@ -642,7 +643,8 @@ class FortranProgram(Directive):
 		doc = predoc if predoc is not None else getattr(program, "doc", None)
 		_append_doc(section, doc, self.state)
 
-		if src:
+		show_source_code = "no-show-code" not in self.options
+		if src and show_source_code:
 			_append_fortran_code_block(section, source=src)
 
 		deps = list(getattr(program, "dependencies", None) or [])
