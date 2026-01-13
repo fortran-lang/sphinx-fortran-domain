@@ -69,9 +69,20 @@ class FortranInterface:
 
 
 @dataclass(frozen=True)
+class FortranVariable:
+	"""A module/submodule variable declaration."""
+
+	name: str
+	decl: str | None = None  # e.g. "real, parameter" or "type(vec), allocatable"
+	doc: str | None = None
+	location: SourceLocation | None = None
+
+
+@dataclass(frozen=True)
 class FortranModuleInfo:
 	name: str
 	doc: str | None = None
+	variables: Sequence[FortranVariable] = field(default_factory=list)
 	procedures: Sequence[FortranProcedure] = field(default_factory=list)
 	types: Sequence[FortranType] = field(default_factory=list)
 	interfaces: Sequence[FortranInterface] = field(default_factory=list)
@@ -83,6 +94,7 @@ class FortranSubmoduleInfo:
 	name: str
 	parent: str
 	doc: str | None = None
+	variables: Sequence[FortranVariable] = field(default_factory=list)
 	procedures: Sequence[FortranProcedure] = field(default_factory=list)
 	types: Sequence[FortranType] = field(default_factory=list)
 	interfaces: Sequence[FortranInterface] = field(default_factory=list)

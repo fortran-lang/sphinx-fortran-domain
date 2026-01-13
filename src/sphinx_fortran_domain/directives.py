@@ -345,12 +345,23 @@ def _stamp_source_line(node: nodes.Node, *, source: str = "<fortran>", line: int
 	if getattr(node, "line", None) is None:
 		node.line = line  # type: ignore[attr-defined]
 
+def _append_named_decl_docs(
+	section: nodes.Element,
+	title: str,
+	items,
+	state,
+	*,
+	anchors_by_name: dict[str, str] | None = None,
+	as_field_list: bool = True,
+) -> None:
+	"""Render a standard name/decl/doc definition list inside a field list.
 
-def _append_argument_docs(section: nodes.Element, args, state) -> None:
-	if not args:
+	This is the canonical rendering used for procedure Arguments and module Variables.
+	"""
+	if not items:
 		return
 	rows = []
-	for a in args:
+	for a in items:
 		name = getattr(a, "name", "")
 		decl = getattr(a, "decl", None) or ""
 		doc = getattr(a, "doc", None)
@@ -368,6 +379,11 @@ def _append_argument_docs(section: nodes.Element, args, state) -> None:
 		_stamp_source_line(item)
 		term = nodes.term()
 		_stamp_source_line(term)
+		anchor = (anchors_by_name or {}).get(str(name))
+		if anchor:
+			# Add an invisible target so xrefs land on the correct row without
+			# changing the visual rendering.
+			term += nodes.target(ids=[anchor])
 		term += nodes.strong(text=str(name))
 		item += term
 		if decl:
@@ -382,7 +398,11 @@ def _append_argument_docs(section: nodes.Element, args, state) -> None:
 		item += definition
 		dl += item
 
-	section += _field_list("Arguments", dl)
+	if as_field_list:
+		section += _field_list(title, dl)
+	else:
+		section += nodes.subtitle(text=str(title))
+		section += dl
 
 
 def _append_return_docs(section: nodes.Element, result, state) -> None:
@@ -532,7 +552,7 @@ def _append_object_description(
 	preamble_doc, section_blocks_doc = _split_out_doc_section_blocks(doc)
 	# Keep the opening free-text docstring at the top.
 	_append_doc(content, preamble_doc, state)
-	_append_argument_docs(content, args, state)
+	_append_named_decl_docs(content, "Arguments", args, state)
 	if objtype == "function":
 		_append_return_docs(content, result, state)
 	_append_component_docs(content, components, state)
@@ -700,6 +720,26 @@ class FortranModule(Directive):
 
 		_append_doc(section, getattr(module, "doc", None), self.state)
 
+		if getattr(module, "variables", None):
+			anchors: dict[str, str] = {}
+			for v in module.variables:
+				name = getattr(v, "name", "")
+				if not name:
+					continue
+				fullname = f"{modname}.{name}"
+				obj_anchor = _make_object_id("variable", fullname)
+				anchors[str(name)] = obj_anchor
+				getattr(domain, "note_object")(name=name, objtype="variable", anchor=obj_anchor)
+				index["entries"].append(("single", f"{name} (variable)", obj_anchor, "", None))
+			_append_named_decl_docs(
+				section,
+				"Variables",
+				module.variables,
+				self.state,
+				anchors_by_name=anchors,
+				as_field_list=False,
+			)
+
 		if getattr(module, "types", None):
 			section += nodes.subtitle(text="Types")
 			for t in module.types:
@@ -782,6 +822,26 @@ class FortranSubmodule(Directive):
 			return [index, nodes.warning(text=f"Fortran submodule '{submodname}' not found (did you configure fortran_sources?)")]
 
 		_append_doc(section, getattr(submodule, "doc", None), self.state)
+
+		if getattr(submodule, "variables", None):
+			anchors: dict[str, str] = {}
+			for v in submodule.variables:
+				name = getattr(v, "name", "")
+				if not name:
+					continue
+				fullname = f"{submodname}.{name}"
+				obj_anchor = _make_object_id("variable", fullname)
+				anchors[str(name)] = obj_anchor
+				getattr(domain, "note_object")(name=name, objtype="variable", anchor=obj_anchor)
+				index["entries"].append(("single", f"{name} (variable)", obj_anchor, "", None))
+			_append_named_decl_docs(
+				section,
+				"Variables",
+				submodule.variables,
+				self.state,
+				anchors_by_name=anchors,
+				as_field_list=False,
+			)
 
 		if getattr(submodule, "types", None):
 			section += nodes.subtitle(text="Types")

@@ -67,6 +67,19 @@ def test_regex_lexer_parses_examples() -> None:
     # Derived type component decl should include dimension + default initializer.
     math_utilities = result.modules.get("math_utilities")
     assert math_utilities is not None
+
+    # Module variables (parameters/objects) should be captured and documented.
+    vars_ = list(getattr(math_utilities, "variables", []) or [])
+    assert {v.name for v in vars_} >= {"PI", "E", "one_vector"}
+    pi = next((v for v in vars_ if v.name == "PI"), None)
+    assert pi is not None
+    assert pi.doc and "constant" in pi.doc.lower()
+    assert pi.decl and "parameter" in pi.decl.lower()
+    one = next((v for v in vars_ if v.name == "one_vector"), None)
+    assert one is not None
+    assert one.doc and "one vector" in one.doc.lower()
+    assert one.decl and "type(" in one.decl.lower()
+
     t_mat = next((t for t in math_utilities.types if t.name == "matrix_type"), None)
     assert t_mat is not None
     elements = next((c for c in getattr(t_mat, "components", []) if c.name == "elements"), None)

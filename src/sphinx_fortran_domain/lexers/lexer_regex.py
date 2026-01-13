@@ -23,6 +23,7 @@ from sphinx_fortran_domain.lexers import (
 	FortranSubmoduleInfo,
 	FortranType,
 	FortranTypeBoundProcedure,
+	FortranVariable,
 	SourceLocation,
 )
 
@@ -230,9 +231,13 @@ class RegexFortranLexer(FortranLexer):
 		scope_name: Optional[str] = None
 		scope_parent: Optional[str] = None
 		in_header_doc_phase = False
+		header_doc_inline_open = False
+		header_doc_inline_seen = False
 		current_program_lines: List[str] | None = None
 		in_program_contains = False
 		current_program_deps: set[str] | None = None
+		in_scope_contains = False  # for module/submodule
+		scope_vars_seen: set[str] = set()
 
 		current_proc: Optional[dict] = None
 		current_type: Optional[dict] = None
@@ -259,6 +264,26 @@ class RegexFortranLexer(FortranLexer):
 			modules[scope_name] = FortranModuleInfo(
 				name=current.name,
 				doc=updated,
+				variables=getattr(current, "variables", ()),
+				procedures=current.procedures,
+				types=current.types,
+				interfaces=current.interfaces,
+				location=current.location,
+			)
+
+		def add_submodule_doc_line(text: str) -> None:
+			nonlocal submodules
+			if scope_kind != "submodule" or not scope_name:
+				return
+			current = submodules.get(scope_name)
+			if current is None:
+				return
+			updated = (current.doc + "\n" + text).strip() if current.doc else text.strip()
+			submodules[scope_name] = FortranSubmoduleInfo(
+				name=current.name,
+				parent=current.parent,
+				doc=updated,
+				variables=getattr(current, "variables", ()),
 				procedures=current.procedures,
 				types=current.types,
 				interfaces=current.interfaces,
@@ -310,8 +335,18 @@ class RegexFortranLexer(FortranLexer):
 					add_to_pending(doc_text)
 					continue
 				if in_header_doc_phase:
-					if scope_kind == "module":
-						add_module_doc_line(doc_text)
+					if scope_kind in {"module", "submodule"}:
+						if header_doc_inline_open:
+							# Doc lines immediately after the module/submodule statement
+							# are treated as container-level docs. If a blank line occurs first,
+							# header_doc_inline_open will be False and docs attach to the next symbol.
+							if scope_kind == "module":
+								add_module_doc_line(doc_text)
+							else:
+								add_submodule_doc_line(doc_text)
+							header_doc_inline_seen = True
+						else:
+							add_to_pending(doc_text)
 					else:
 						# For programs, we render doc markers from the embedded source to avoid duplication.
 						add_to_pending(doc_text)
@@ -321,6 +356,8 @@ class RegexFortranLexer(FortranLexer):
 
 			if raw.strip() == "":
 				# Keep doc blocks intact through blank lines.
+				if in_header_doc_phase and scope_kind in {"module", "submodule"} and not header_doc_inline_seen:
+					header_doc_inline_open = False
 				if current_proc is not None and current_proc.get("in_proc_doc_phase"):
 					current_proc["post_sig_doc_buffer"].append("")
 				elif current_type is not None and pending_doc:
@@ -361,6 +398,7 @@ class RegexFortranLexer(FortranLexer):
 							modules[current_type["container_name"]] = FortranModuleInfo(
 								name=container.name,
 								doc=container.doc,
+								variables=getattr(container, "variables", ()),
 								procedures=container.procedures,
 								types=[*container.types, entry],
 								interfaces=container.interfaces,
@@ -373,6 +411,7 @@ class RegexFortranLexer(FortranLexer):
 								name=container.name,
 								parent=container.parent,
 								doc=container.doc,
+								variables=getattr(container, "variables", ()),
 								procedures=container.procedures,
 								types=[*container.types, entry],
 								interfaces=container.interfaces,
@@ -512,6 +551,7 @@ class RegexFortranLexer(FortranLexer):
 						modules[current_proc["container_name"]] = FortranModuleInfo(
 							name=container.name,
 							doc=container.doc,
+							variables=getattr(container, "variables", ()),
 							procedures=[*container.procedures, entry],
 							types=container.types,
 							interfaces=container.interfaces,
@@ -524,6 +564,7 @@ class RegexFortranLexer(FortranLexer):
 							name=container.name,
 							parent=container.parent,
 							doc=container.doc,
+							variables=getattr(container, "variables", ()),
 							procedures=[*container.procedures, entry],
 							types=container.types,
 							interfaces=container.interfaces,
@@ -552,6 +593,7 @@ class RegexFortranLexer(FortranLexer):
 				modules[name] = FortranModuleInfo(
 					name=name,
 					doc=flush_doc(),
+					variables=[],
 					procedures=[],
 					types=[],
 					interfaces=[],
@@ -561,6 +603,10 @@ class RegexFortranLexer(FortranLexer):
 				scope_name = name
 				scope_parent = None
 				in_header_doc_phase = True
+				header_doc_inline_open = True
+				header_doc_inline_seen = False
+				in_scope_contains = False
+				scope_vars_seen = set()
 				continue
 
 			m = _RE_SUBMODULE.match(line)
@@ -570,6 +616,7 @@ class RegexFortranLexer(FortranLexer):
 					name=name,
 					parent=parent,
 					doc=flush_doc(),
+					variables=[],
 					procedures=[],
 					types=[],
 					interfaces=[],
@@ -579,6 +626,10 @@ class RegexFortranLexer(FortranLexer):
 				scope_name = name
 				scope_parent = parent
 				in_header_doc_phase = True
+				header_doc_inline_open = True
+				header_doc_inline_seen = False
+				in_scope_contains = False
+				scope_vars_seen = set()
 				continue
 
 			m = _RE_PROGRAM.match(line)
@@ -596,6 +647,10 @@ class RegexFortranLexer(FortranLexer):
 				scope_name = name
 				scope_parent = None
 				in_header_doc_phase = True
+				header_doc_inline_open = False
+				header_doc_inline_seen = False
+				in_scope_contains = False
+				scope_vars_seen = set()
 				# Seed capture with the current `program ...` line.
 				current_program_lines = [raw]
 				in_program_contains = False
@@ -607,6 +662,10 @@ class RegexFortranLexer(FortranLexer):
 				scope_name = None
 				scope_parent = None
 				in_header_doc_phase = False
+				header_doc_inline_open = False
+				header_doc_inline_seen = False
+				in_scope_contains = False
+				scope_vars_seen = set()
 				pending_doc = []
 				continue
 
@@ -615,6 +674,10 @@ class RegexFortranLexer(FortranLexer):
 				scope_name = None
 				scope_parent = None
 				in_header_doc_phase = False
+				header_doc_inline_open = False
+				header_doc_inline_seen = False
+				in_scope_contains = False
+				scope_vars_seen = set()
 				pending_doc = []
 				continue
 
@@ -635,6 +698,10 @@ class RegexFortranLexer(FortranLexer):
 				scope_name = None
 				scope_parent = None
 				in_header_doc_phase = False
+				header_doc_inline_open = False
+				header_doc_inline_seen = False
+				in_scope_contains = False
+				scope_vars_seen = set()
 				current_program_lines = None
 				in_program_contains = False
 				current_program_deps = None
@@ -649,6 +716,8 @@ class RegexFortranLexer(FortranLexer):
 				if _RE_CONTAINS.match(line):
 					if scope_kind == "program":
 						in_program_contains = True
+					elif scope_kind in {"module", "submodule"}:
+						in_scope_contains = True
 					in_header_doc_phase = False
 					continue
 				# Any other statement ends header doc collection.
@@ -660,7 +729,108 @@ class RegexFortranLexer(FortranLexer):
 				pending_doc = []
 				continue
 
+			# Module/Submodule CONTAINS marks the transition to procedures.
+			if scope_kind in {"module", "submodule"} and _RE_CONTAINS.match(line):
+				in_scope_contains = True
+				pending_doc = []
+				continue
+
 			# Collect symbols into the current scope
+			# Variables (module/submodule spec-part, before CONTAINS)
+			if (
+				scope_kind in {"module", "submodule"}
+				and scope_name
+				and not in_scope_contains
+				and current_proc is None
+				and current_type is None
+			):
+				inline = _find_inline_doc(line, doc_markers)
+				doc_inline: Optional[str] = None
+				code_part = line
+				if inline is not None:
+					pos, marker = inline
+					code_part = line[:pos].rstrip()
+					doc_inline = line[pos + len(marker) :].strip() or None
+					# Inline docs shouldn't merge with prior pending docs.
+					pending_doc = []
+
+				decl = _decl_from_declaration(code_part)
+				names = _declared_names_from_declaration(code_part)
+				decl_low = (decl or "").strip().lower()
+				is_stmt_with_colon = decl_low.startswith(
+					(
+						"public",
+						"private",
+						"protected",
+						"generic",
+						"procedure",
+						"import",
+						"use",
+					)
+				)
+				is_type_def = bool(_RE_TYPE_DEF.match(code_part))
+
+				if names and decl and not is_stmt_with_colon and not is_type_def:
+					dims = _dims_from_declaration(code_part)
+					inits = _inits_from_declaration(code_part)
+					doc = flush_doc()
+					if doc_inline:
+						doc = f"{doc}\n{doc_inline}".strip() if doc else doc_inline
+
+					new_vars: List[FortranVariable] = []
+					for n in names:
+						key = n.lower()
+						if key in scope_vars_seen:
+							continue
+						scope_vars_seen.add(key)
+
+						decl_n = decl
+						dim_n = dims.get(n)
+						if dim_n and "dimension" not in (decl_n or "").lower():
+							decl_n = f"{decl_n}, dimension({dim_n})".strip(", ")
+						init_n = inits.get(n)
+						if init_n:
+							decl_n = f"{decl_n}, Default = {init_n}".strip(", ") if decl_n else f"Default = {init_n}"
+
+						new_vars.append(
+							FortranVariable(
+								name=n,
+								decl=decl_n,
+								doc=doc,
+								location=SourceLocation(path=path, lineno=idx),
+							)
+						)
+
+					if new_vars:
+						if scope_kind == "module":
+							container = modules.get(scope_name)
+							if container:
+								modules[scope_name] = FortranModuleInfo(
+									name=container.name,
+									doc=container.doc,
+									variables=[*getattr(container, "variables", ()), *new_vars],
+									procedures=container.procedures,
+									types=container.types,
+									interfaces=container.interfaces,
+									location=container.location,
+								)
+						else:
+							container = submodules.get(scope_name)
+							if container:
+								submodules[scope_name] = FortranSubmoduleInfo(
+									name=container.name,
+									parent=container.parent,
+									doc=container.doc,
+									variables=[*getattr(container, "variables", ()), *new_vars],
+									procedures=container.procedures,
+									types=container.types,
+									interfaces=container.interfaces,
+									location=container.location,
+								)
+
+					pending_doc = []
+					continue
+
 			proc = _match_proc(line)
 			if proc and scope_name and (
 				scope_kind in {"module", "submodule"}
@@ -803,6 +973,7 @@ class RegexFortranLexer(FortranLexer):
 						modules[scope_name] = FortranModuleInfo(
 							name=current.name,
 							doc=current.doc,
+							variables=getattr(current, "variables", ()),
 							procedures=current.procedures,
 							types=current.types,
 							interfaces=[*current.interfaces, entry],
@@ -815,6 +986,7 @@ class RegexFortranLexer(FortranLexer):
 							name=current.name,
 							parent=current.parent,
 							doc=current.doc,
+							variables=getattr(current, "variables", ()),
 							procedures=current.procedures,
 							types=current.types,
 							interfaces=[*current.interfaces, entry],

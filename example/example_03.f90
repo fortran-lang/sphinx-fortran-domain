@@ -31,6 +31,8 @@ module math_utilities
         procedure :: determinant => matrix_determinant
         procedure :: inverse => matrix_inverse
     end type matrix_type
+
+    type(vector_type), parameter :: one_vector = vector_type(1.0, 1.0, 1.0) !> One vector constant
     
 contains
 
