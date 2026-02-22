@@ -5,8 +5,11 @@ Fortran-lang's base Sphinx domain to document Fortran projects.
 > **WARNING**: This project is under construction, at this stage you can use it but expect missing features or some rendering bugs. Your friendly feedback will be very important to get this project in shape.
 
 ## Install
+For regular usage:
 
-Editable install for development:
+`pip install sphinx-fortran-domain`
+
+For editable install for development:
 
 `pip install -e .`
 
