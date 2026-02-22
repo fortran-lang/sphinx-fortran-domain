@@ -239,6 +239,7 @@ class RegexFortranLexer(FortranLexer):
 		in_scope_contains = False  # for module/submodule
 		scope_vars_seen: set[str] = set()
 
+		proc_stack: List[dict] = []
 		current_proc: Optional[dict] = None
 		current_type: Optional[dict] = None
 
@@ -504,12 +505,17 @@ class RegexFortranLexer(FortranLexer):
 				continue
 
 			if current_proc is not None and _RE_END_PROC.match(line):
-				# Finalize procedure.
-				kind = current_proc["kind"]
-				name = current_proc["name"]
-				arg_order: List[str] = current_proc["arg_order"]
-				arg_docs: Dict[str, str] = current_proc["arg_docs"]
-				arg_decls: Dict[str, str] = current_proc["arg_decls"]
+				# Finalize the current (innermost) procedure. Nested internal procedures
+				# are ignored for documentation purposes; only depth-1 procedures are
+				# emitted into the module/submodule/program API.
+				finished = proc_stack.pop() if proc_stack else current_proc
+				current_proc = proc_stack[-1] if proc_stack else None
+
+				kind = finished["kind"]
+				name = finished["name"]
+				arg_order: List[str] = finished["arg_order"]
+				arg_docs: Dict[str, str] = finished["arg_docs"]
+				arg_decls: Dict[str, str] = finished["arg_decls"]
 				args: List[FortranArgument] = []
 				for aname in arg_order:
 					doc = arg_docs.get(aname)
@@ -517,8 +523,8 @@ class RegexFortranLexer(FortranLexer):
 					args.append(FortranArgument(name=aname, decl=decl, doc=doc, location=None))
 
 				# Merge doc captured before signature with the doc captured after signature.
-				proc_doc = current_proc.get("doc")
-				post = "\n".join(current_proc.get("proc_doc_lines", [])).strip() or None
+				proc_doc = finished.get("doc")
+				post = "\n".join(finished.get("proc_doc_lines", [])).strip() or None
 				if proc_doc and post:
 					proc_doc = f"{proc_doc}\n{post}".strip()
 				elif post:
@@ -527,62 +533,62 @@ class RegexFortranLexer(FortranLexer):
 				entry = FortranProcedure(
 					name=name,
 					kind=kind,
-					signature=current_proc.get("signature"),
+					signature=finished.get("signature"),
 					doc=proc_doc,
-					location=current_proc["location"],
+					location=finished["location"],
 					arguments=tuple(args),
 					result=(
 						FortranArgument(
-							name=str(current_proc.get("result_name")),
-							decl=current_proc.get("result_decl"),
-							doc=current_proc.get("result_doc"),
+							name=str(finished.get("result_name")),
+							decl=finished.get("result_decl"),
+							doc=finished.get("result_doc"),
 							location=None,
 						)
 						if kind == "function"
-						and current_proc.get("result_name")
-						and (current_proc.get("result_decl") is not None or current_proc.get("result_doc") is not None)
+						and finished.get("result_name")
+						and (finished.get("result_decl") is not None or finished.get("result_doc") is not None)
 						else None
 					),
 				)
 
-				if current_proc["container_kind"] == "module":
-					container = modules.get(current_proc["container_name"])  # type: ignore[arg-type]
-					if container:
-						modules[current_proc["container_name"]] = FortranModuleInfo(
-							name=container.name,
-							doc=container.doc,
-							variables=getattr(container, "variables", ()),
-							procedures=[*container.procedures, entry],
-							types=container.types,
-							interfaces=container.interfaces,
-							location=container.location,
-						)
-				elif current_proc["container_kind"] == "submodule":
-					container = submodules.get(current_proc["container_name"])  # type: ignore[arg-type]
-					if container:
-						submodules[current_proc["container_name"]] = FortranSubmoduleInfo(
-							name=container.name,
-							parent=container.parent,
-							doc=container.doc,
-							variables=getattr(container, "variables", ()),
-							procedures=[*container.procedures, entry],
-							types=container.types,
-							interfaces=container.interfaces,
-							location=container.location,
-						)
-				elif current_proc["container_kind"] == "program":
-					container = programs.get(current_proc["container_name"])  # type: ignore[arg-type]
-					if container:
-						programs[current_proc["container_name"]] = FortranProgramInfo(
-							name=container.name,
-							doc=container.doc,
-							location=container.location,
-							dependencies=getattr(container, "dependencies", ()),
-							procedures=[*getattr(container, "procedures", ()), entry],
-							source=getattr(container, "source", None),
-						)
+				if finished.get("nesting_depth", 1) == 1:
+					if finished["container_kind"] == "module":
+						container = modules.get(finished["container_name"])  # type: ignore[arg-type]
+						if container:
+							modules[finished["container_name"]] = FortranModuleInfo(
+								name=container.name,
+								doc=container.doc,
+								variables=getattr(container, "variables", ()),
+								procedures=[*container.procedures, entry],
+								types=container.types,
+								interfaces=container.interfaces,
+								location=container.location,
+							)
+					elif finished["container_kind"] == "submodule":
+						container = submodules.get(finished["container_name"])  # type: ignore[arg-type]
+						if container:
+							submodules[finished["container_name"]] = FortranSubmoduleInfo(
+								name=container.name,
+								parent=container.parent,
+								doc=container.doc,
+								variables=getattr(container, "variables", ()),
+								procedures=[*container.procedures, entry],
+								types=container.types,
+								interfaces=container.interfaces,
+								location=container.location,
+							)
+					elif finished["container_kind"] == "program":
+						container = programs.get(finished["container_name"])  # type: ignore[arg-type]
+						if container:
+							programs[finished["container_name"]] = FortranProgramInfo(
+								name=container.name,
+								doc=container.doc,
+								location=container.location,
+								dependencies=getattr(container, "dependencies", ()),
+								procedures=[*getattr(container, "procedures", ()), entry],
+								source=getattr(container, "source", None),
+							)
 
-				current_proc = None
 				pending_doc = []
 				continue
 
@@ -838,13 +844,14 @@ class RegexFortranLexer(FortranLexer):
 			):
 				kind, name, arg_order, raw_sig = proc
 				pre_sig_doc = flush_doc()
-				current_proc = {
+				new_proc = {
 					"kind": kind,
 					"name": name,
 					"doc": pre_sig_doc,
 					"location": SourceLocation(path=path, lineno=idx),
 					"container_kind": scope_kind,
 					"container_name": scope_name,
+					"nesting_depth": len(proc_stack) + 1,
 					"result_name": None,
 					"result_doc": None,
 					"result_decl": None,
@@ -859,6 +866,8 @@ class RegexFortranLexer(FortranLexer):
 					"in_proc_doc_phase": pre_sig_doc is None,
 					"signature": _normalize_proc_signature(raw_sig),
 				}
+				proc_stack.append(new_proc)
+				current_proc = new_proc
 				if kind == "function":
 					mres = _RE_RESULT.search(raw_sig)
 					current_proc["result_name"] = mres.group(1) if mres else name

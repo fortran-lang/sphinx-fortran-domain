@@ -214,6 +214,19 @@ contains
         else
             inv%elements = 0.0  ! Singular matrix
         end if
+
+        contains
+
+        !> Private helper function for matrix inverse calculation (will not be documented)
+        pure function cofactor(i, j) result(cof)
+            integer, intent(in) :: i, j
+            real :: cof
+            
+            ! Calculate cofactor for element (i,j)
+            ! ... (implementation details omitted for brevity)
+            cof = 0.0  ! Placeholder
+        end function cofactor
+
     end function matrix_inverse
 
 end module math_utilities

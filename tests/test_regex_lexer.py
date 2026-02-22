@@ -68,6 +68,11 @@ def test_regex_lexer_parses_examples() -> None:
     math_utilities = result.modules.get("math_utilities")
     assert math_utilities is not None
 
+    # Only depth-1 procedures should be emitted at module level.
+    # Internal nested procedures inside a module procedure must be ignored.
+    assert any(p.name == "matrix_inverse" for p in math_utilities.procedures)
+    assert not any(p.name == "cofactor" for p in math_utilities.procedures)
+
     # Module variables (parameters/objects) should be captured and documented.
     vars_ = list(getattr(math_utilities, "variables", []) or [])
     assert {v.name for v in vars_} >= {"PI", "E", "one_vector"}
