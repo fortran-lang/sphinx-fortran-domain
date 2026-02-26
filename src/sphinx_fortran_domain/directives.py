@@ -564,50 +564,169 @@ def _append_object_description(
 	section += desc
 
 class FortranObject(ObjectDescription[str]):
-    """Base directive for Fortran objects (manual declarations)."""
+	"""Base class for manual Fortran object directives.
 
-    has_content = True
-    required_arguments = 1
+	Use these directives when you want to declare API objects directly in docs,
+	instead of relying on parsed ``fortran_sources``.
 
-    def handle_signature(self, sig: str, signode: addnodes.desc_signature) -> str:
-        fullname = sig.strip()
-        signode += addnodes.desc_name(fullname, fullname)
-        return fullname
+	In reStructuredText:
 
-    def add_target_and_index(self, name: str, sig: str, signode: addnodes.desc_signature) -> None:
-        domain: FortranDomain = self.env.get_domain("f")  # type: ignore[assignment]
-        objtype = self.objtype
-        anchor = _make_object_id(objtype, name)
+	.. code-block:: rst
 
-        if anchor not in signode["ids"]:
-            signode["ids"].append(anchor)
+	   .. f:function:: solve_linear_system(a, b)
 
-        domain.note_object(name=name, objtype=objtype, anchor=anchor)
+	      Solves ``Ax = b``.
 
-        index_text = f"{name} ({objtype})"
-        self.indexnode["entries"].append(("single", index_text, anchor, "", None))
+	In MyST Markdown (requires MyST directive fences):
 
+	.. code-block:: md
 
-class FortranProgramDecl(FortranObject):
-	objtype = "program"
+	   ```{f:function} solve_linear_system(a, b)
+	   Solves `Ax = b`.
+	   ```
+	"""
+	has_content = True
+	required_arguments = 1
+
+	def handle_signature(self, sig: str, signode: addnodes.desc_signature) -> str:
+		fullname = sig.strip()
+		signode += addnodes.desc_name(fullname, fullname)
+		return fullname
+
+	def add_target_and_index(self, name: str, sig: str, signode: addnodes.desc_signature) -> None:
+		domain: FortranDomain = self.env.get_domain("f")  # type: ignore[assignment]
+		objtype = self.objtype
+		anchor = _make_object_id(objtype, name)
+
+		if anchor not in signode["ids"]:
+			signode["ids"].append(anchor)
+
+		domain.note_object(name=name, objtype=objtype, anchor=anchor)
+
+		index_text = f"{name} ({objtype})"
+		self.indexnode["entries"].append(("single", index_text, anchor, "", None))
+
 
 class FortranFunction(FortranObject):
+	"""Manual declaration for a Fortran function.
+
+	In reStructuredText:
+
+	.. code-block:: rst
+
+	   .. f:function:: det(a)
+
+	      Computes the determinant of ``a``.
+
+	In MyST Markdown:
+
+	.. code-block:: md
+
+	   ```{f:function} det(a)
+	   Computes the determinant of `a`.
+	   ```
+	"""
 	objtype = "function"
 
 
 class FortranSubroutine(FortranObject):
+	"""Manual declaration for a Fortran subroutine.
+
+	In reStructuredText:
+
+	.. code-block:: rst
+
+	   .. f:subroutine:: normalize(vec)
+
+	      Normalizes ``vec`` in place.
+
+	In MyST Markdown:
+
+	.. code-block:: md
+
+	   ```{f:subroutine} normalize(vec)
+	   Normalizes `vec` in place.
+	   ```
+	"""
 	objtype = "subroutine"
 
 
 class FortranType(FortranObject):
+	"""Manual declaration for a Fortran derived type.
+
+	In reStructuredText:
+
+	.. code-block:: rst
+
+	   .. f:type:: mesh_t
+
+	      Unstructured mesh container.
+
+	In MyST Markdown:
+
+	.. code-block:: md
+
+	   ```{f:type} mesh_t
+	   Unstructured mesh container.
+	   ```
+	"""
 	objtype = "type"
 
 
 class FortranInterface(FortranObject):
+	"""Manual declaration for a Fortran interface or generic interface.
+
+	In reStructuredText:
+
+	.. code-block:: rst
+
+	   .. f:interface:: solve
+
+	      Generic interface for linear solvers.
+
+	In MyST Markdown:
+
+	.. code-block:: md
+
+	   ```{f:interface} solve
+	   Generic interface for linear solvers.
+	   ```
+	"""
 	objtype = "interface"
 
 
 class FortranProgram(Directive):
+	"""Render a parsed Fortran ``program``.
+
+	This directive looks up a program from the domain parsed result (typically
+	populated from ``fortran_sources``) and renders:
+
+	* program title and docstring block,
+	* optional source code,
+	* ``use`` dependencies,
+	* optional internal procedures.
+
+	Options:
+
+	* ``:no-show-code:`` hide the program source block.
+	* ``:procedures:`` force rendering internal procedures.
+	* ``:no-procedures:`` hide internal procedures.
+
+	In reStructuredText:
+
+	.. code-block:: rst
+
+	   .. f:program:: simulation_main
+	      :no-show-code:
+
+	In MyST Markdown:
+
+	.. code-block:: md
+
+	   ```{f:program} simulation_main
+	   :no-show-code:
+	   ```
+	"""
 	required_arguments = 1
 	option_spec = {
 		"procedures": rst_directives.flag,
@@ -701,6 +820,24 @@ class FortranProgram(Directive):
 
 
 class FortranModule(Directive):
+	"""Render a parsed Fortran module and its public members.
+
+	This directive resolves a module from parsed sources and renders module docs,
+	variables, derived types, procedures, and interfaces in one section.
+
+	In reStructuredText:
+
+	.. code-block:: rst
+
+	   .. f:module:: linalg
+
+	In MyST Markdown:
+
+	.. code-block:: md
+
+	   ```{f:module} linalg
+	   ```
+	"""
 	required_arguments = 1
 
 	def run(self):
@@ -804,6 +941,24 @@ class FortranModule(Directive):
 		return [index, section]
 
 class FortranSubmodule(Directive):
+	"""Render a parsed Fortran submodule and its members.
+
+	Use this for projects that split implementation into submodules and want
+	automatic API pages similar to ``f:module``.
+
+	In reStructuredText:
+
+	.. code-block:: rst
+
+	   .. f:submodule:: linalg_impl
+
+	In MyST Markdown:
+
+	.. code-block:: md
+
+	   ```{f:submodule} linalg_impl
+	   ```
+	"""
 	required_arguments = 1
 
 	def run(self):
