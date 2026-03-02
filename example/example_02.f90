@@ -19,9 +19,6 @@ module example_module
 contains
 
     !> Add two vectors together
-    !> @param vec1 First vector
-    !> @param vec2 Second vector  
-    !> @return Resultant vector
     pure function add_vectors(vec1, vec2) result(result_vec)
         type(vector_type), intent(in) :: vec1, vec2
         type(vector_type) :: result_vec
@@ -32,7 +29,6 @@ contains
     end function add_vectors
     
     !> Normalize a vector to unit length
-    !> @param vec Vector to normalize
     subroutine normalize_vector(vec)
         type(vector_type), intent(inout) :: vec
         real :: mag
@@ -46,8 +42,6 @@ contains
     end subroutine normalize_vector
     
     !> Calculate vector magnitude
-    !> @param this Vector instance
-    !> @return Magnitude of the vector
     pure function vector_magnitude(this) result(mag)
         class(vector_type), intent(in) :: this
         real :: mag
@@ -56,9 +50,6 @@ contains
     end function vector_magnitude
     
     !> Calculate dot product of two vectors
-    !> @param this First vector
-    !> @param other Second vector
-    !> @return Dot product result
     pure function vector_dot_product(this, other) result(dot_prod)
         class(vector_type), intent(in) :: this
         type(vector_type), intent(in) :: other
