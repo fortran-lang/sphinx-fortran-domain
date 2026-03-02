@@ -25,6 +25,7 @@ class FortranProcedure:
 	kind: str  # "function" | "subroutine"
 	signature: str | None = None  # e.g. "pure function foo(a) -> res"
 	doc: str | None = None
+	is_private: bool = False
 	location: SourceLocation | None = None
 	arguments: Sequence[FortranArgument] = field(default_factory=tuple)
 	# For functions, the result variable (e.g. `result(res)` or implicit function-name result).
@@ -39,6 +40,7 @@ class FortranComponent:
 	name: str
 	decl: str | None = None  # e.g. "real" or "real, dimension(3,3)"
 	doc: str | None = None
+	is_private: bool = False
 	location: SourceLocation | None = None
 
 
@@ -49,6 +51,7 @@ class FortranTypeBoundProcedure:
 	name: str  # binding name as used in code: `x%name()`
 	target: str | None = None  # concrete procedure name, if known
 	doc: str | None = None
+	is_private: bool = False
 	location: SourceLocation | None = None
 
 
@@ -56,6 +59,7 @@ class FortranTypeBoundProcedure:
 class FortranType:
 	name: str
 	doc: str | None = None
+	is_private: bool = False
 	components: Sequence[FortranComponent] = field(default_factory=list)
 	bound_procedures: Sequence[FortranTypeBoundProcedure] = field(default_factory=list)
 	location: SourceLocation | None = None
@@ -65,6 +69,7 @@ class FortranType:
 class FortranInterface:
 	name: str
 	doc: str | None = None
+	is_private: bool = False
 	location: SourceLocation | None = None
 
 
@@ -75,6 +80,7 @@ class FortranVariable:
 	name: str
 	decl: str | None = None  # e.g. "real, parameter" or "type(vec), allocatable"
 	doc: str | None = None
+	is_private: bool = False
 	location: SourceLocation | None = None
 
 

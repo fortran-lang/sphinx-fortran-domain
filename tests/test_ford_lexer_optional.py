@@ -84,6 +84,12 @@ def test_ford_lexer_parses_examples_without_crashing() -> None:
     # Derived type component decl should include dimension + default initializer.
     math_utilities = result.modules.get("math_utilities")
     assert math_utilities is not None
+
+    # Module variables (including public parameters) should be captured.
+    vars_ = list(getattr(math_utilities, "variables", []) or [])
+    names = {v.name for v in vars_}
+    assert {"PI", "E"}.issubset(names)
+
     t_mat = next((t for t in math_utilities.types if t.name == "matrix_type"), None)
     assert t_mat is not None
     elements = next((c for c in getattr(t_mat, "components", []) if c.name == "elements"), None)
@@ -92,3 +98,10 @@ def test_ford_lexer_parses_examples_without_crashing() -> None:
     assert "dimension" in elements.decl.lower()
     assert "3" in elements.decl
     assert "default" in elements.decl.lower()
+
+    # Visibility mapping from FORD permission metadata should be preserved.
+    t_vec = next((t for t in math_utilities.types if t.name == "vector_type"), None)
+    assert t_vec is not None
+    z_comp = next((c for c in getattr(t_vec, "components", []) if c.name == "z"), None)
+    assert z_comp is not None
+    assert getattr(z_comp, "is_private", False) is True

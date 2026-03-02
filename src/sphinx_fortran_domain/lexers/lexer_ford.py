@@ -18,6 +18,7 @@ from sphinx_fortran_domain.lexers import (
     FortranSubmoduleInfo,
     FortranType,
     FortranTypeBoundProcedure,
+    FortranVariable,
     SourceLocation,
 )
 
@@ -296,7 +297,8 @@ def _prepare_text_for_ford(text: str, configured_markers: Sequence[str], *, ford
         replaced_leading = False
         for m in markers:
             if stripped.startswith(m):
-                out.append(indent + ford_marker + _drop_single_leading_ws(stripped[len(m) :]))
+                payload = _drop_single_leading_ws(stripped[len(m) :])
+                out.append(indent + ford_marker + payload)
                 replaced_leading = True
                 break
         if replaced_leading:
@@ -335,6 +337,19 @@ def _choose_ford_marker(configured_markers: Sequence[str]) -> str:
         if m[1] != "!":
             return m
     return "!>"
+
+
+def _is_item_private(item: object) -> bool:
+    perm = str(getattr(item, "permission", "") or "").strip().lower()
+    if perm == "private":
+        return True
+    if perm == "public":
+        return False
+    if bool(getattr(item, "private", False)):
+        return True
+    if bool(getattr(item, "public", False)):
+        return False
+    return False
 
 
 def _ford_settings_and_marker(doc_markers: Sequence[str], *, directory: Path) -> tuple[ProjectSettings, str]:
@@ -435,7 +450,14 @@ class FORDFortranLexer(FortranLexer):
         if isinstance(item, FordModule):
             modules.setdefault(
                 name,
-                FortranModuleInfo(name=name, doc=doc, procedures=[], types=[], interfaces=[], location=loc),
+                FortranModuleInfo(
+                    name=name, 
+                    doc=doc, 
+                    variables=[], 
+                    procedures=[], 
+                    types=[], 
+                    interfaces=[], 
+                    location=loc),
             )
             self._ingest_container_children(item, container_name=name, modules=modules)
             return
@@ -448,6 +470,7 @@ class FORDFortranLexer(FortranLexer):
                     name=name,
                     parent=str(parent),
                     doc=doc,
+                    variables=[],
                     procedures=[],
                     types=[],
                     interfaces=[],
@@ -505,8 +528,23 @@ class FORDFortranLexer(FortranLexer):
             return
 
         procedures: List[FortranProcedure] = list(current.procedures)
+        variables: List[FortranVariable] = list(getattr(current, "variables", []) or [])
         types: List[FortranType] = list(current.types)
         interfaces: List[FortranInterface] = list(current.interfaces)
+
+        for v in getattr(item, "variables", []) or []:
+            vname = str(getattr(v, "name", "")).strip()
+            if not vname:
+                continue
+            variables.append(
+                FortranVariable(
+                    name=vname,
+                    decl=_var_decl_from_ford(v),
+                    doc=_get_doc(v),
+                    is_private=_is_item_private(v),
+                    location=_get_location(v),
+                )
+            )
 
         for f in getattr(item, "functions", []) or []:
             procedures.append(self._convert_procedure(f, kind="function"))
@@ -523,6 +561,7 @@ class FORDFortranLexer(FortranLexer):
                         name=vname,
                         decl=_var_decl_from_ford(v),
                         doc=_get_doc(v),
+                        is_private=_is_item_private(v),
                         location=_get_location(v),
                     )
                 )
@@ -544,6 +583,7 @@ class FORDFortranLexer(FortranLexer):
                         name=bname,
                         target=target or bname,
                         doc=_get_doc(bp),
+                        is_private=_is_item_private(bp),
                         location=_get_location(bp),
                     )
                 )
@@ -552,15 +592,24 @@ class FORDFortranLexer(FortranLexer):
                 FortranType(
                     name=str(getattr(t, "name", "")),
                     doc=_get_doc(t),
+                    is_private=_is_item_private(t),
                     components=components,
                     bound_procedures=bound,
                     location=_get_location(t),
                 )
             )
         for i in getattr(item, "interfaces", []) or []:
-            interfaces.append(FortranInterface(name=str(getattr(i, "name", "")), doc=_get_doc(i), location=_get_location(i)))
+            interfaces.append(
+                FortranInterface(
+                    name=str(getattr(i, "name", "")),
+                    doc=_get_doc(i),
+                    is_private=_is_item_private(i),
+                    location=_get_location(i),
+                )
+            )
 
         # Filter empty names
+        variables = [v for v in variables if v.name]
         procedures = [p for p in procedures if p.name]
         types = [t for t in types if t.name]
         interfaces = [i for i in interfaces if i.name]
@@ -568,6 +617,7 @@ class FORDFortranLexer(FortranLexer):
         modules[container_name] = FortranModuleInfo(
             name=current.name,
             doc=current.doc,
+            variables=variables,
             procedures=procedures,
             types=types,
             interfaces=interfaces,
@@ -582,8 +632,23 @@ class FORDFortranLexer(FortranLexer):
             return
 
         procedures: List[FortranProcedure] = list(current.procedures)
+        variables: List[FortranVariable] = list(getattr(current, "variables", []) or [])
         types: List[FortranType] = list(current.types)
         interfaces: List[FortranInterface] = list(current.interfaces)
+
+        for v in getattr(item, "variables", []) or []:
+            vname = str(getattr(v, "name", "")).strip()
+            if not vname:
+                continue
+            variables.append(
+                FortranVariable(
+                    name=vname,
+                    decl=_var_decl_from_ford(v),
+                    doc=_get_doc(v),
+                    is_private=_is_item_private(v),
+                    location=_get_location(v),
+                )
+            )
 
         for f in getattr(item, "functions", []) or []:
             procedures.append(self._convert_procedure(f, kind="function"))
@@ -600,6 +665,7 @@ class FORDFortranLexer(FortranLexer):
                         name=vname,
                         decl=_var_decl_from_ford(v),
                         doc=_get_doc(v),
+                        is_private=_is_item_private(v),
                         location=_get_location(v),
                     )
                 )
@@ -621,6 +687,7 @@ class FORDFortranLexer(FortranLexer):
                         name=bname,
                         target=target or bname,
                         doc=_get_doc(bp),
+                        is_private=_is_item_private(bp),
                         location=_get_location(bp),
                     )
                 )
@@ -629,14 +696,23 @@ class FORDFortranLexer(FortranLexer):
                 FortranType(
                     name=str(getattr(t, "name", "")),
                     doc=_get_doc(t),
+                    is_private=_is_item_private(t),
                     components=components,
                     bound_procedures=bound,
                     location=_get_location(t),
                 )
             )
         for i in getattr(item, "interfaces", []) or []:
-            interfaces.append(FortranInterface(name=str(getattr(i, "name", "")), doc=_get_doc(i), location=_get_location(i)))
+            interfaces.append(
+                FortranInterface(
+                    name=str(getattr(i, "name", "")),
+                    doc=_get_doc(i),
+                    is_private=_is_item_private(i),
+                    location=_get_location(i),
+                )
+            )
 
+        variables = [v for v in variables if v.name]
         procedures = [p for p in procedures if p.name]
         types = [t for t in types if t.name]
         interfaces = [i for i in interfaces if i.name]
@@ -645,6 +721,7 @@ class FORDFortranLexer(FortranLexer):
             name=current.name,
             parent=current.parent,
             doc=current.doc,
+            variables=variables,
             procedures=procedures,
             types=types,
             interfaces=interfaces,
@@ -684,6 +761,7 @@ class FORDFortranLexer(FortranLexer):
             kind=kind,
             signature=_proc_signature_from_ford(proc),
             doc=_get_doc(proc),
+            is_private=_is_item_private(proc),
             location=_get_location(proc),
             arguments=tuple(args),
             result=result,

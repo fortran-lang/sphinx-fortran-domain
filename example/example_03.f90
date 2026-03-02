@@ -18,7 +18,7 @@ module math_utilities
     type :: vector_type
         real :: x = 0.0 !> X component
         real :: y = 0.0 !> Y component
-        real :: z = 0.0 !> Z component
+        real, private :: z = 0.0 !> Z component
     contains
         procedure :: normalize => vector_normalize
         procedure :: cross => vector_cross_product

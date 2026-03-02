@@ -563,6 +563,17 @@ def _append_object_description(
 
 	section += desc
 
+
+def _is_private_member(item) -> bool:
+	return bool(getattr(item, "is_private", False))
+
+def _filter_visibility(items, *, show_private: bool):
+	if not items:
+		return []
+	if show_private:
+		return list(items)
+	return [item for item in items if not _is_private_member(item)]
+
 class FortranObject(ObjectDescription[str]):
 	"""Base class for manual Fortran object directives.
 
@@ -825,26 +836,37 @@ class FortranModule(Directive):
 	This directive resolves a module from parsed sources and renders module docs,
 	variables, derived types, procedures, and interfaces in one section.
 
+	Options:
+
+	* ``:show-private:`` include private module members and private type internals
+	  (components/type-bound procedures). By default, private elements are hidden.
+
 	In reStructuredText:
 
 	.. code-block:: rst
 
 	   .. f:module:: linalg
+	      :show-private:
 
 	In MyST Markdown:
 
 	.. code-block:: md
 
 	   ```{f:module} linalg
+	   :show-private:
 	   ```
 	"""
 	required_arguments = 1
+	option_spec = {
+		"show-private": rst_directives.flag,
+	}
 
 	def run(self):
 		modname = self.arguments[0]
 		env = self.state.document.settings.env
 		domain = env.get_domain("f")
 		module = getattr(domain, "get_module")(modname)
+		show_private = "show-private" in self.options
 
 		anchor = nodes.make_id(f"f-module-{modname}")
 		index = addnodes.index(entries=[("single", f"{modname} (module)", anchor, "", None)])
@@ -857,9 +879,10 @@ class FortranModule(Directive):
 
 		_append_doc(section, getattr(module, "doc", None), self.state)
 
-		if getattr(module, "variables", None):
+		variables = _filter_visibility(getattr(module, "variables", None), show_private=show_private)
+		if variables:
 			anchors: dict[str, str] = {}
-			for v in module.variables:
+			for v in variables:
 				name = getattr(v, "name", "")
 				if not name:
 					continue
@@ -871,15 +894,19 @@ class FortranModule(Directive):
 			_append_named_decl_docs(
 				section,
 				"Variables",
-				module.variables,
+				variables,
 				self.state,
 				anchors_by_name=anchors,
 				as_field_list=False,
 			)
 
-		if getattr(module, "types", None):
+		types = _filter_visibility(getattr(module, "types", None), show_private=show_private)
+		procedures = _filter_visibility(getattr(module, "procedures", None), show_private=show_private)
+		interfaces = _filter_visibility(getattr(module, "interfaces", None), show_private=show_private)
+
+		if types:
 			section += nodes.subtitle(text="Types")
-			for t in module.types:
+			for t in types:
 				fullname = f"{modname}.{t.name}"
 				obj_anchor = _make_object_id("type", fullname)
 				getattr(domain, "note_object")(name=t.name, objtype="type", anchor=obj_anchor)
@@ -895,15 +922,15 @@ class FortranModule(Directive):
 					signature=getattr(t, "signature", None),
 					doc=getattr(t, "doc", None),
 					state=self.state,
-					components=getattr(t, "components", None),
-					bindings=getattr(t, "bound_procedures", None),
-					all_procedures=getattr(module, "procedures", None),
+					components=_filter_visibility(getattr(t, "components", None), show_private=show_private),
+					bindings=_filter_visibility(getattr(t, "bound_procedures", None), show_private=show_private),
+					all_procedures=procedures,
 				)
 				section += sub
 
-		if getattr(module, "procedures", None):
+		if procedures:
 			section += nodes.subtitle(text="Procedures")
-			for p in module.procedures:
+			for p in procedures:
 				kind = getattr(p, "kind", "procedure")
 				fullname = f"{modname}.{p.name}"
 				obj_anchor = _make_object_id(kind, fullname)
@@ -925,9 +952,9 @@ class FortranModule(Directive):
 				)
 				section += sub
 
-		if getattr(module, "interfaces", None):
+		if interfaces:
 			section += nodes.subtitle(text="Interfaces")
-			for g in module.interfaces:
+			for g in interfaces:
 				fullname = f"{modname}.{g.name}"
 				obj_anchor = _make_object_id("interface", fullname)
 				getattr(domain, "note_object")(name=g.name, objtype="interface", anchor=obj_anchor)
@@ -946,26 +973,37 @@ class FortranSubmodule(Directive):
 	Use this for projects that split implementation into submodules and want
 	automatic API pages similar to ``f:module``.
 
+	Options:
+
+	* ``:show-private:`` include private submodule members and private type internals
+	  (components/type-bound procedures). By default, private elements are hidden.
+
 	In reStructuredText:
 
 	.. code-block:: rst
 
 	   .. f:submodule:: linalg_impl
+	      :show-private:
 
 	In MyST Markdown:
 
 	.. code-block:: md
 
 	   ```{f:submodule} linalg_impl
+	   :show-private:
 	   ```
 	"""
 	required_arguments = 1
+	option_spec = {
+		"show-private": rst_directives.flag,
+	}
 
 	def run(self):
 		submodname = self.arguments[0]
 		env = self.state.document.settings.env
 		domain = env.get_domain("f")
 		submodule = getattr(domain, "get_submodule")(submodname)
+		show_private = "show-private" in self.options
 
 		anchor = nodes.make_id(f"f-submodule-{submodname}")
 		index = addnodes.index(entries=[("single", f"{submodname} (submodule)", anchor, "", None)])
@@ -978,9 +1016,10 @@ class FortranSubmodule(Directive):
 
 		_append_doc(section, getattr(submodule, "doc", None), self.state)
 
-		if getattr(submodule, "variables", None):
+		variables = _filter_visibility(getattr(submodule, "variables", None), show_private=show_private)
+		if variables:
 			anchors: dict[str, str] = {}
-			for v in submodule.variables:
+			for v in variables:
 				name = getattr(v, "name", "")
 				if not name:
 					continue
@@ -992,15 +1031,19 @@ class FortranSubmodule(Directive):
 			_append_named_decl_docs(
 				section,
 				"Variables",
-				submodule.variables,
+				variables,
 				self.state,
 				anchors_by_name=anchors,
 				as_field_list=False,
 			)
 
-		if getattr(submodule, "types", None):
+		types = _filter_visibility(getattr(submodule, "types", None), show_private=show_private)
+		procedures = _filter_visibility(getattr(submodule, "procedures", None), show_private=show_private)
+		interfaces = _filter_visibility(getattr(submodule, "interfaces", None), show_private=show_private)
+
+		if types:
 			section += nodes.subtitle(text="Types")
-			for t in submodule.types:
+			for t in types:
 				fullname = f"{submodname}.{t.name}"
 				obj_anchor = _make_object_id("type", fullname)
 				getattr(domain, "note_object")(name=t.name, objtype="type", anchor=obj_anchor)
@@ -1016,15 +1059,15 @@ class FortranSubmodule(Directive):
 					signature=getattr(t, "signature", None),
 					doc=getattr(t, "doc", None),
 					state=self.state,
-					components=getattr(t, "components", None),
-					bindings=getattr(t, "bound_procedures", None),
-					all_procedures=getattr(submodule, "procedures", None),
+					components=_filter_visibility(getattr(t, "components", None), show_private=show_private),
+					bindings=_filter_visibility(getattr(t, "bound_procedures", None), show_private=show_private),
+					all_procedures=procedures,
 				)
 				section += sub
 
-		if getattr(submodule, "procedures", None):
+		if procedures:
 			section += nodes.subtitle(text="Procedures")
-			for p in submodule.procedures:
+			for p in procedures:
 				kind = getattr(p, "kind", "procedure")
 				fullname = f"{submodname}.{p.name}"
 				obj_anchor = _make_object_id(kind, fullname)
@@ -1046,9 +1089,9 @@ class FortranSubmodule(Directive):
 				)
 				section += sub
 
-		if getattr(submodule, "interfaces", None):
+		if interfaces:
 			section += nodes.subtitle(text="Interfaces")
-			for g in submodule.interfaces:
+			for g in interfaces:
 				fullname = f"{submodname}.{g.name}"
 				obj_anchor = _make_object_id("interface", fullname)
 				getattr(domain, "note_object")(name=g.name, objtype="interface", anchor=obj_anchor)

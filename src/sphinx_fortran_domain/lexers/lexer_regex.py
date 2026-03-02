@@ -54,6 +54,10 @@ _RE_TYPE_PROC_BIND = re.compile(
 )
 _RE_END_PROC = re.compile(r"^\s*end\s*(subroutine|function)\b", re.IGNORECASE)
 _RE_RESULT = re.compile(r"\bresult\s*\(\s*([A-Za-z_]\w*)\s*\)", re.IGNORECASE)
+_RE_ACCESS_STMT = re.compile(
+	r"^\s*(?P<mode>public|private)\b(?:\s*::\s*(?P<names>[^!]+))?\s*$",
+	re.IGNORECASE,
+)
 
 
 def _match_proc(line: str) -> Optional[tuple[str, str, list[str], str]]:
@@ -195,6 +199,54 @@ def _match_interface(line: str) -> Optional[str]:
 		return None
 	return m.group(1)
 
+
+def _parse_access_statement(line: str) -> Optional[tuple[str, list[str]]]:
+	code = _strip_inline_comment(line)
+	m = _RE_ACCESS_STMT.match(code)
+	if not m:
+		return None
+	mode = (m.group("mode") or "").strip().lower()
+	names_text = (m.group("names") or "").strip()
+	names: list[str] = []
+	if names_text:
+		for token in _split_top_level_commas(names_text):
+			t = token.strip()
+			mm = re.match(r"^([A-Za-z_]\w*)\b", t)
+			if mm:
+				names.append(mm.group(1).lower())
+	return mode, names
+
+
+def _explicit_private_from_attrs(attrs_text: str | None) -> bool | None:
+	if not attrs_text:
+		return None
+	low = attrs_text.lower()
+	has_private = re.search(r"\bprivate\b", low) is not None
+	has_public = re.search(r"\bpublic\b", low) is not None
+	if has_private and not has_public:
+		return True
+	if has_public and not has_private:
+		return False
+	return None
+
+
+def _resolve_is_private(
+	*,
+	name: str,
+	explicit_private: bool | None,
+	default_private: bool,
+	public_names: set[str],
+	private_names: set[str],
+) -> bool:
+	if explicit_private is not None:
+		return explicit_private
+	key = str(name).strip().lower()
+	if key in public_names:
+		return False
+	if key in private_names:
+		return True
+	return bool(default_private)
+
 class RegexFortranLexer(FortranLexer):
 	name = "regex"
 
@@ -238,6 +290,9 @@ class RegexFortranLexer(FortranLexer):
 		current_program_deps: set[str] | None = None
 		in_scope_contains = False  # for module/submodule
 		scope_vars_seen: set[str] = set()
+		scope_default_private = False
+		scope_public_names: set[str] = set()
+		scope_private_names: set[str] = set()
 
 		proc_stack: List[dict] = []
 		current_proc: Optional[dict] = None
@@ -386,9 +441,17 @@ class RegexFortranLexer(FortranLexer):
 			if current_type is not None:
 				# We are inside a derived type definition.
 				if _RE_END_TYPE.match(line):
+					type_is_private = _resolve_is_private(
+						name=current_type["name"],
+						explicit_private=current_type.get("explicit_private"),
+						default_private=scope_default_private,
+						public_names=scope_public_names,
+						private_names=scope_private_names,
+					)
 					entry = FortranType(
 						name=current_type["name"],
 						doc=current_type.get("doc"),
+						is_private=type_is_private,
 						components=tuple(current_type.get("components", [])),
 						bound_procedures=tuple(current_type.get("bound_procedures", [])),
 						location=current_type.get("location"),
@@ -428,6 +491,22 @@ class RegexFortranLexer(FortranLexer):
 					pending_doc = []
 					continue
 
+				access_stmt = _parse_access_statement(line)
+				if access_stmt is not None:
+					mode, names = access_stmt
+					if names:
+						for n in names:
+							if mode == "private":
+								current_type["private_names"].add(n)
+								current_type["public_names"].discard(n)
+							else:
+								current_type["public_names"].add(n)
+								current_type["private_names"].discard(n)
+					else:
+						current_type["default_private"] = (mode == "private")
+					pending_doc = []
+					continue
+
 				# Type-bound procedure bindings
 				if current_type.get("in_type_contains"):
 					inline = _find_inline_doc(line, doc_markers)
@@ -443,6 +522,14 @@ class RegexFortranLexer(FortranLexer):
 					if m:
 						name = m.group("name")
 						target = m.group("target") or name
+						explicit_private = _explicit_private_from_attrs(m.group("attrs"))
+						is_private = _resolve_is_private(
+							name=name,
+							explicit_private=explicit_private,
+							default_private=bool(current_type.get("default_private", False)),
+							public_names=current_type.get("public_names", set()),
+							private_names=current_type.get("private_names", set()),
+						)
 						doc = flush_doc()
 						if doc_inline:
 							doc = f"{doc}\n{doc_inline}".strip() if doc else doc_inline
@@ -451,6 +538,7 @@ class RegexFortranLexer(FortranLexer):
 								name=name,
 								target=target,
 								doc=doc,
+								is_private=is_private,
 								location=SourceLocation(path=path, lineno=idx),
 							)
 						)
@@ -474,6 +562,7 @@ class RegexFortranLexer(FortranLexer):
 
 				names = _declared_names_from_declaration(code_part)
 				decl = _decl_from_declaration(code_part)
+				explicit_private = _explicit_private_from_attrs(decl)
 				dims = _dims_from_declaration(code_part)
 				inits = _inits_from_declaration(code_part)
 				if names and decl:
@@ -495,6 +584,13 @@ class RegexFortranLexer(FortranLexer):
 								name=n,
 								decl=decl_n,
 								doc=doc,
+								is_private=_resolve_is_private(
+									name=n,
+									explicit_private=explicit_private,
+									default_private=bool(current_type.get("default_private", False)),
+									public_names=current_type.get("public_names", set()),
+									private_names=current_type.get("private_names", set()),
+								),
 								location=SourceLocation(path=path, lineno=idx),
 							)
 						)
@@ -535,6 +631,17 @@ class RegexFortranLexer(FortranLexer):
 					kind=kind,
 					signature=finished.get("signature"),
 					doc=proc_doc,
+					is_private=(
+						_resolve_is_private(
+							name=name,
+							explicit_private=finished.get("explicit_private"),
+							default_private=scope_default_private,
+							public_names=scope_public_names,
+							private_names=scope_private_names,
+						)
+						if finished.get("container_kind") in {"module", "submodule"}
+						else False
+					),
 					location=finished["location"],
 					arguments=tuple(args),
 					result=(
@@ -613,6 +720,9 @@ class RegexFortranLexer(FortranLexer):
 				header_doc_inline_seen = False
 				in_scope_contains = False
 				scope_vars_seen = set()
+				scope_default_private = False
+				scope_public_names = set()
+				scope_private_names = set()
 				continue
 
 			m = _RE_SUBMODULE.match(line)
@@ -636,6 +746,9 @@ class RegexFortranLexer(FortranLexer):
 				header_doc_inline_seen = False
 				in_scope_contains = False
 				scope_vars_seen = set()
+				scope_default_private = False
+				scope_public_names = set()
+				scope_private_names = set()
 				continue
 
 			m = _RE_PROGRAM.match(line)
@@ -657,6 +770,9 @@ class RegexFortranLexer(FortranLexer):
 				header_doc_inline_seen = False
 				in_scope_contains = False
 				scope_vars_seen = set()
+				scope_default_private = False
+				scope_public_names = set()
+				scope_private_names = set()
 				# Seed capture with the current `program ...` line.
 				current_program_lines = [raw]
 				in_program_contains = False
@@ -672,6 +788,9 @@ class RegexFortranLexer(FortranLexer):
 				header_doc_inline_seen = False
 				in_scope_contains = False
 				scope_vars_seen = set()
+				scope_default_private = False
+				scope_public_names = set()
+				scope_private_names = set()
 				pending_doc = []
 				continue
 
@@ -684,6 +803,9 @@ class RegexFortranLexer(FortranLexer):
 				header_doc_inline_seen = False
 				in_scope_contains = False
 				scope_vars_seen = set()
+				scope_default_private = False
+				scope_public_names = set()
+				scope_private_names = set()
 				pending_doc = []
 				continue
 
@@ -708,6 +830,9 @@ class RegexFortranLexer(FortranLexer):
 				header_doc_inline_seen = False
 				in_scope_contains = False
 				scope_vars_seen = set()
+				scope_default_private = False
+				scope_public_names = set()
+				scope_private_names = set()
 				current_program_lines = None
 				in_program_contains = False
 				current_program_deps = None
@@ -718,6 +843,19 @@ class RegexFortranLexer(FortranLexer):
 				# Header doc phase ends at the first non-doc statement other than implicit/use/private/public.
 				stripped = _strip_inline_comment(line).strip().lower()
 				if stripped.startswith(("use ", "implicit ", "private", "public")):
+					access_stmt = _parse_access_statement(line)
+					if access_stmt is not None and scope_kind in {"module", "submodule"}:
+						mode, names = access_stmt
+						if names:
+							for n in names:
+								if mode == "private":
+									scope_private_names.add(n)
+									scope_public_names.discard(n)
+								else:
+									scope_public_names.add(n)
+									scope_private_names.discard(n)
+						else:
+							scope_default_private = (mode == "private")
 					continue
 				if _RE_CONTAINS.match(line):
 					if scope_kind == "program":
@@ -750,6 +888,29 @@ class RegexFortranLexer(FortranLexer):
 				and current_proc is None
 				and current_type is None
 			):
+				access_stmt = _parse_access_statement(line)
+				if access_stmt is not None:
+					mode, names = access_stmt
+					if names:
+						for n in names:
+							if mode == "private":
+								scope_private_names.add(n)
+								scope_public_names.discard(n)
+							else:
+								scope_public_names.add(n)
+								scope_private_names.discard(n)
+					else:
+						scope_default_private = (mode == "private")
+					pending_doc = []
+					continue
+
+			if (
+				scope_kind in {"module", "submodule"}
+				and scope_name
+				and not in_scope_contains
+				and current_proc is None
+				and current_type is None
+			):
 				inline = _find_inline_doc(line, doc_markers)
 				doc_inline: Optional[str] = None
 				code_part = line
@@ -762,6 +923,7 @@ class RegexFortranLexer(FortranLexer):
 
 				decl = _decl_from_declaration(code_part)
 				names = _declared_names_from_declaration(code_part)
+				explicit_private = _explicit_private_from_attrs(decl)
 				decl_low = (decl or "").strip().lower()
 				is_stmt_with_colon = decl_low.startswith(
 					(
@@ -803,6 +965,13 @@ class RegexFortranLexer(FortranLexer):
 								name=n,
 								decl=decl_n,
 								doc=doc,
+								is_private=_resolve_is_private(
+									name=n,
+									explicit_private=explicit_private,
+									default_private=scope_default_private,
+									public_names=scope_public_names,
+									private_names=scope_private_names,
+								),
 								location=SourceLocation(path=path, lineno=idx),
 							)
 						)
@@ -861,6 +1030,7 @@ class RegexFortranLexer(FortranLexer):
 					"arg_decls": {},
 					"proc_doc_lines": [],
 					"post_sig_doc_buffer": [],
+					"explicit_private": _explicit_private_from_attrs(raw_sig),
 					# If there is already doc before the signature, treat any post-signature
 					# doc lines as argument docs (not additional procedure docs).
 					"in_proc_doc_phase": pre_sig_doc is None,
@@ -963,10 +1133,14 @@ class RegexFortranLexer(FortranLexer):
 				current_type = {
 					"name": name,
 					"doc": flush_doc(),
+					"explicit_private": _explicit_private_from_attrs(t.group("attrs")),
 					"location": SourceLocation(path=path, lineno=idx),
 					"container_kind": scope_kind,
 					"container_name": scope_name,
 					"in_type_contains": False,
+					"default_private": False,
+					"public_names": set(),
+					"private_names": set(),
 					"components": [],
 					"bound_procedures": [],
 				}
@@ -975,7 +1149,18 @@ class RegexFortranLexer(FortranLexer):
 			iface = _match_interface(line)
 			if iface and scope_kind in {"module", "submodule"} and scope_name:
 				doc = flush_doc()
-				entry = FortranInterface(name=iface, doc=doc, location=SourceLocation(path=path, lineno=idx))
+				entry = FortranInterface(
+					name=iface,
+					doc=doc,
+					is_private=_resolve_is_private(
+						name=iface,
+						explicit_private=None,
+						default_private=scope_default_private,
+						public_names=scope_public_names,
+						private_names=scope_private_names,
+					),
+					location=SourceLocation(path=path, lineno=idx),
+				)
 				if scope_kind == "module":
 					current = modules.get(scope_name)
 					if current:
