@@ -115,3 +115,8 @@ Inline math also works via `:math:`:
 ```Fortran
 !> The magnitude is :math:`|\vec{v}| = \sqrt{x^2 + y^2 + z^2}`.
 ```
+
+## Community
+
+- Contributing guide: [CONTRIBUTING.md](CONTRIBUTING.md)
+- Code of conduct: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
