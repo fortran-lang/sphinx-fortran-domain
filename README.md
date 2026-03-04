@@ -118,5 +118,5 @@ Inline math also works via `:math:`:
 
 ## Community
 
-- Contributing guide: [CONTRIBUTING.md](CONTRIBUTING.md)
-- Code of conduct: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+- Contributing guide: [CONTRIBUTING.md](https://github.com/fortran-lang/sphinx-fortran-domain/blob/main/CONTRIBUTING.md)
+- Code of conduct: [CODE_OF_CONDUCT.md](https://github.com/fortran-lang/sphinx-fortran-domain/blob/main/CODE_OF_CONDUCT.md)
