@@ -31,18 +31,29 @@ def _read_root_version_file() -> str | None:
 		return None
 
 
-def _detect_version() -> str:
-	# Prefer installed distribution metadata (works for wheels and editable installs).
+def _read_dist_version() -> str | None:
 	try:
 		v = metadata.version("sphinx-fortran-domain")
-		if v:
-			return v
+		return v.strip() if v else None
 	except metadata.PackageNotFoundError:
-		pass
+		return None
 
-	# Fallback for source checkouts without an installed dist.
-	v = _read_root_version_file()
-	return v or "0.0.0"
+
+def _detect_version() -> str:
+	# Keep source checkouts deterministic even if multiple distributions are present
+	# in the active environment (e.g. stale site-packages metadata plus editable).
+	root_version = _read_root_version_file()
+	dist_version = _read_dist_version()
+
+	if root_version and dist_version and root_version != dist_version:
+		logger.debug(
+			"sphinx_fortran_domain: version mismatch (dist=%s, root=%s); using root VERSION",
+			dist_version,
+			root_version,
+		)
+		return root_version
+
+	return dist_version or root_version or "0.0.0"
 
 
 __version__ = _detect_version()

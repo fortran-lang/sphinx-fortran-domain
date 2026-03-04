@@ -7,6 +7,31 @@ name = "sphinx-fortran-domain"
 dynamic = ["version"]
 description = "A modern Sphinx domain for Fortran"
 readme = "README.md"
+license = "MIT"
+authors = [
+	{ name = "fortran-lang community" },
+]
+keywords = [
+	"sphinx",
+	"fortran",
+	"documentation",
+	"domain",
+]
+classifiers = [
+	"Development Status :: 3 - Alpha",
+	"Framework :: Sphinx :: Extension",
+	"Intended Audience :: Developers",
+	"Programming Language :: Python",
+	"Programming Language :: Python :: 3",
+	"Programming Language :: Python :: 3.9",
+	"Programming Language :: Python :: 3.10",
+	"Programming Language :: Python :: 3.11",
+	"Programming Language :: Python :: 3.12",
+	"Programming Language :: Python :: 3.13",
+	"Topic :: Documentation",
+	"Topic :: Software Development :: Documentation",
+	"Topic :: Software Development :: Libraries :: Python Modules",
+]
 requires-python = ">=3.9"
 dependencies = [
 	"Sphinx>=6",
