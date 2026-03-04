@@ -2,7 +2,9 @@
 
 Fortran-lang's base Sphinx domain to document Fortran projects.
 
-> **WARNING**: This project is under construction, at this stage you can use it but expect missing features or some rendering bugs. Your friendly feedback will be very important to get this project in shape.
+> **Status**: This project is preparing its first official 0.1.x release. The core API is usable and tested; feedback and issue reports are welcome.
+
+- Changelog: [CHANGELOG.md](https://github.com/fortran-lang/sphinx-fortran-domain/blob/main/CHANGELOG.md)
 
 ## Install
 For regular usage:
