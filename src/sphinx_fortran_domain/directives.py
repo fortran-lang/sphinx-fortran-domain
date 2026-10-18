@@ -493,10 +493,13 @@ def _append_type_bound_procedures(section: nodes.Element, bindings, all_procedur
 	for b in bindings:
 		bname = getattr(b, "name", "")
 		target = getattr(b, "target", None) or bname
+		targets = tuple(getattr(b, "targets", ()) or ())
+		if not targets and target:
+			targets = (target,)
 		if not bname:
 			continue
 
-		proc = _find_proc_by_name(all_procedures, target)
+		proc = _find_proc_by_name(all_procedures, target) if len(targets) == 1 else None
 		kind = getattr(proc, "kind", None) if proc is not None else None
 
 		para = nodes.paragraph()
@@ -512,6 +515,26 @@ def _append_type_bound_procedures(section: nodes.Element, bindings, all_procedur
 			para += xref
 		else:
 			para += nodes.literal(text=str(bname))
+
+		if targets and not (len(targets) == 1 and targets[0] == bname):
+			para += nodes.Text(" => ")
+			for index, target_name in enumerate(targets):
+				if index:
+					para += nodes.Text(", ")
+				target_proc = _find_proc_by_name(all_procedures, target_name)
+				target_kind = getattr(target_proc, "kind", None) if target_proc is not None else None
+				if target_proc is not None and target_kind in {"function", "subroutine"}:
+					xref = addnodes.pending_xref(
+						"",
+						refdomain="f",
+						reftype=str(target_kind),
+						reftarget=str(target_name),
+						refexplicit=True,
+					)
+					xref += nodes.literal(text=str(target_name))
+					para += xref
+				else:
+					para += nodes.literal(text=str(target_name))
 
 		item = nodes.list_item("", para)
 		items += item
@@ -573,6 +596,61 @@ def _filter_visibility(items, *, show_private: bool):
 	if show_private:
 		return list(items)
 	return [item for item in items if not _is_private_member(item)]
+
+
+def _binding_target_names(binding) -> list[str]:
+	targets = list(getattr(binding, "targets", ()) or ())
+	if targets:
+		return [str(t) for t in targets if str(t)]
+	target = getattr(binding, "target", None)
+	if target:
+		return [str(target)]
+	name = getattr(binding, "name", None)
+	return [str(name)] if name else []
+
+
+def _collect_exported_procedure_names_from_types(types, procedures, *, show_private: bool) -> set[str]:
+	if show_private:
+		return {str(getattr(proc, "name", "")) for proc in procedures or [] if getattr(proc, "name", "")}
+
+	procedure_names = {str(getattr(proc, "name", "")) for proc in procedures or [] if getattr(proc, "name", "")}
+	exported: set[str] = set()
+
+	for fortran_type in _filter_visibility(types, show_private=False):
+		visible_bindings = _filter_visibility(getattr(fortran_type, "bound_procedures", None), show_private=False)
+		binding_by_name = {
+			str(getattr(binding, "name", "")): binding
+			for binding in visible_bindings
+			if getattr(binding, "name", "")
+		}
+		pending = [name for binding in visible_bindings for name in _binding_target_names(binding)]
+		seen: set[str] = set()
+
+		while pending:
+			name = str(pending.pop())
+			if not name or name in seen:
+				continue
+			seen.add(name)
+			if name in procedure_names:
+				exported.add(name)
+				continue
+			binding = binding_by_name.get(name)
+			if binding is not None:
+				pending.extend(_binding_target_names(binding))
+
+	return exported
+
+
+def _filter_exported_procedures(procedures, *, types, show_private: bool):
+	all_procedures = list(procedures or [])
+	if show_private:
+		return all_procedures
+	exported_names = _collect_exported_procedure_names_from_types(types, all_procedures, show_private=show_private)
+	return [
+		procedure
+		for procedure in all_procedures
+		if not _is_private_member(procedure) or str(getattr(procedure, "name", "")) in exported_names
+	]
 
 class FortranObject(ObjectDescription[str]):
 	"""Base class for manual Fortran object directives.
@@ -901,7 +979,11 @@ class FortranModule(Directive):
 			)
 
 		types = _filter_visibility(getattr(module, "types", None), show_private=show_private)
-		procedures = _filter_visibility(getattr(module, "procedures", None), show_private=show_private)
+		procedures = _filter_exported_procedures(
+			getattr(module, "procedures", None),
+			types=getattr(module, "types", None),
+			show_private=show_private,
+		)
 		interfaces = _filter_visibility(getattr(module, "interfaces", None), show_private=show_private)
 
 		if types:
@@ -1038,7 +1120,11 @@ class FortranSubmodule(Directive):
 			)
 
 		types = _filter_visibility(getattr(submodule, "types", None), show_private=show_private)
-		procedures = _filter_visibility(getattr(submodule, "procedures", None), show_private=show_private)
+		procedures = _filter_exported_procedures(
+			getattr(submodule, "procedures", None),
+			types=getattr(submodule, "types", None),
+			show_private=show_private,
+		)
 		interfaces = _filter_visibility(getattr(submodule, "interfaces", None), show_private=show_private)
 
 		if types:

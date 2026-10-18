@@ -80,6 +80,7 @@ def test_ford_lexer_parses_examples_without_crashing() -> None:
     mag = next((b for b in bps if b.name == "magnitude"), None)
     assert mag is not None
     assert (mag.target or "").lower().endswith("vector_magnitude")
+    assert tuple(getattr(mag, "targets", ())) == (mag.target,)
 
     # Derived type component decl should include dimension + default initializer.
     math_utilities = result.modules.get("math_utilities")

@@ -51,6 +51,15 @@ module vis_mod
     procedure, public :: pub_bind => impl_pub
   end type pub_type
 
+  type, public :: public_api_type
+  	private
+  contains
+  	procedure :: step => impl_step
+  	procedure :: pop_at_iterator => impl_pop_it
+  	procedure :: pop_at_index => impl_pop_idx
+  	generic :: pop_at => pop_at_iterator, pop_at_index
+  end type public_api_type
+
   interface hidden_iface
   end interface hidden_iface
 
@@ -76,6 +85,18 @@ contains
   subroutine impl_pub(this)
     class(pub_type), intent(inout) :: this
   end subroutine impl_pub
+
+  subroutine impl_step(this)
+  	class(public_api_type), intent(inout) :: this
+  end subroutine impl_step
+  
+  subroutine impl_pop_it(this)
+  	class(public_api_type), intent(inout) :: this
+  end subroutine impl_pop_it
+  
+  subroutine impl_pop_idx(this)
+  	class(public_api_type), intent(inout) :: this
+  end subroutine impl_pop_idx
 
 end module vis_mod
 """.lstrip(),
@@ -145,8 +166,18 @@ def test_show_private_option_controls_module_and_type_members(tmp_path: Path) ->
 
 	assert "pub_var" in html_hidden
 	assert "pub_type (type)" in html_hidden
+	assert "public_api_type (type)" in html_hidden
 	assert "pub_component" in html_hidden
 	assert "pub_bind" in html_hidden
+	assert "step" in html_hidden
+	assert "pop_at" in html_hidden
+	assert "pop_at_iterator" in html_hidden
+	assert "pop_at_index" in html_hidden
+	assert "=&gt;" in html_hidden
+	assert "impl_pub (subroutine)" in html_hidden
+	assert "impl_step (subroutine)" in html_hidden
+	assert "impl_pop_it (subroutine)" in html_hidden
+	assert "impl_pop_idx (subroutine)" in html_hidden
 	assert "pub_func (function)" in html_hidden
 	assert "pub_iface (interface)" in html_hidden
 
@@ -154,6 +185,7 @@ def test_show_private_option_controls_module_and_type_members(tmp_path: Path) ->
 	assert "hidden_type (type)" not in html_hidden
 	assert "hidden_component" not in html_hidden
 	assert "hidden_bind" not in html_hidden
+	assert "impl_hidden (subroutine)" not in html_hidden
 	assert "hidden_func (function)" not in html_hidden
 	assert "hidden_iface (interface)" not in html_hidden
 
