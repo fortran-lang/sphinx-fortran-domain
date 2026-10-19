@@ -52,6 +52,10 @@ _RE_TYPE_PROC_BIND = re.compile(
 	r"^\s*procedure\b(?P<attrs>[^!]*)::\s*(?P<name>[A-Za-z_]\w*)\b(?:\s*=>\s*(?P<target>[A-Za-z_]\w*)\b)?",
 	re.IGNORECASE,
 )
+_RE_TYPE_GENERIC_BIND = re.compile(
+	r"^\s*generic\b(?P<attrs>[^!]*)::\s*(?P<name>[A-Za-z_]\w*)\b\s*=>\s*(?P<targets>.+?)\s*$",
+	re.IGNORECASE,
+)
 _RE_END_PROC = re.compile(r"^\s*end\s*(subroutine|function)\b", re.IGNORECASE)
 _RE_RESULT = re.compile(r"\bresult\s*\(\s*([A-Za-z_]\w*)\s*\)", re.IGNORECASE)
 _RE_ACCESS_STMT = re.compile(
@@ -246,6 +250,20 @@ def _resolve_is_private(
 	if key in private_names:
 		return True
 	return bool(default_private)
+
+
+def _binding_targets_from_text(text: str | None) -> tuple[str, ...]:
+	if not text:
+		return ()
+	targets: List[str] = []
+	for token in _split_top_level_commas(text):
+		name = token.strip()
+		if not name:
+			continue
+		m = re.match(r"^([A-Za-z_]\w*)\b", name)
+		if m:
+			targets.append(m.group(1))
+	return tuple(targets)
 
 class RegexFortranLexer(FortranLexer):
 	name = "regex"
@@ -518,6 +536,14 @@ class RegexFortranLexer(FortranLexer):
 						doc_inline = line[pos + len(marker) :].strip() or None
 						pending_doc = []
 
+					type_is_private = _resolve_is_private(
+						name=current_type["name"],
+						explicit_private=current_type.get("explicit_private"),
+						default_private=scope_default_private,
+						public_names=scope_public_names,
+						private_names=scope_private_names,
+					)
+
 					m = _RE_TYPE_PROC_BIND.match(code_part)
 					if m:
 						name = m.group("name")
@@ -526,7 +552,7 @@ class RegexFortranLexer(FortranLexer):
 						is_private = _resolve_is_private(
 							name=name,
 							explicit_private=explicit_private,
-							default_private=bool(current_type.get("default_private", False)),
+							default_private=type_is_private,
 							public_names=current_type.get("public_names", set()),
 							private_names=current_type.get("private_names", set()),
 						)
@@ -537,6 +563,34 @@ class RegexFortranLexer(FortranLexer):
 							FortranTypeBoundProcedure(
 								name=name,
 								target=target,
+								targets=(target,),
+								doc=doc,
+								is_private=is_private,
+								location=SourceLocation(path=path, lineno=idx),
+							)
+						)
+						continue
+
+					m = _RE_TYPE_GENERIC_BIND.match(code_part)
+					if m:
+						name = m.group("name")
+						targets = _binding_targets_from_text(m.group("targets"))
+						explicit_private = _explicit_private_from_attrs(m.group("attrs"))
+						is_private = _resolve_is_private(
+							name=name,
+							explicit_private=explicit_private,
+							default_private=type_is_private,
+							public_names=current_type.get("public_names", set()),
+							private_names=current_type.get("private_names", set()),
+						)
+						doc = flush_doc()
+						if doc_inline:
+							doc = f"{doc}\n{doc_inline}".strip() if doc else doc_inline
+						current_type["bound_procedures"].append(
+							FortranTypeBoundProcedure(
+								name=name,
+								target=(targets[0] if targets else name),
+								targets=targets,
 								doc=doc,
 								is_private=is_private,
 								location=SourceLocation(path=path, lineno=idx),

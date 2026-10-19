@@ -352,6 +352,22 @@ def _is_item_private(item: object) -> bool:
     return False
 
 
+def _binding_targets(item: object) -> tuple[str, ...]:
+    bindings = getattr(item, "bindings", None)
+    if not isinstance(bindings, (list, tuple)):
+        return ()
+
+    targets: List[str] = []
+    for binding in bindings:
+        try:
+            name = str(binding).strip()
+        except Exception:
+            name = ""
+        if name:
+            targets.append(name)
+    return tuple(targets)
+
+
 def _ford_settings_and_marker(doc_markers: Sequence[str], *, directory: Path) -> tuple[ProjectSettings, str]:
     ford_marker = _choose_ford_marker(doc_markers)
     if len(ford_marker) != 2 or ford_marker[0] == ford_marker[1]:
@@ -571,17 +587,13 @@ class FORDFortranLexer(FortranLexer):
                 bname = str(getattr(bp, "name", "")).strip()
                 if not bname:
                     continue
-                target = None
-                bindings = getattr(bp, "bindings", None)
-                if isinstance(bindings, (list, tuple)) and bindings:
-                    try:
-                        target = str(bindings[0]).strip() or None
-                    except Exception:
-                        target = None
+                targets = _binding_targets(bp)
+                target = targets[0] if targets else None
                 bound.append(
                     FortranTypeBoundProcedure(
                         name=bname,
                         target=target or bname,
+                        targets=targets or ((target or bname),),
                         doc=_get_doc(bp),
                         is_private=_is_item_private(bp),
                         location=_get_location(bp),
@@ -675,17 +687,13 @@ class FORDFortranLexer(FortranLexer):
                 bname = str(getattr(bp, "name", "")).strip()
                 if not bname:
                     continue
-                target = None
-                bindings = getattr(bp, "bindings", None)
-                if isinstance(bindings, (list, tuple)) and bindings:
-                    try:
-                        target = str(bindings[0]).strip() or None
-                    except Exception:
-                        target = None
+                targets = _binding_targets(bp)
+                target = targets[0] if targets else None
                 bound.append(
                     FortranTypeBoundProcedure(
                         name=bname,
                         target=target or bname,
+                        targets=targets or ((target or bname),),
                         doc=_get_doc(bp),
                         is_private=_is_item_private(bp),
                         location=_get_location(bp),

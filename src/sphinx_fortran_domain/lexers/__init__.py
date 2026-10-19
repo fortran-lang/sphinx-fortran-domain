@@ -50,6 +50,7 @@ class FortranTypeBoundProcedure:
 
 	name: str  # binding name as used in code: `x%name()`
 	target: str | None = None  # concrete procedure name, if known
+	targets: Sequence[str] = field(default_factory=tuple)
 	doc: str | None = None
 	is_private: bool = False
 	location: SourceLocation | None = None
