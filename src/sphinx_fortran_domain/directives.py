@@ -10,6 +10,7 @@ from docutils.parsers.rst import directives as rst_directives
 from docutils.statemachine import StringList
 from sphinx import addnodes
 from sphinx.directives import ObjectDescription
+from sphinx.util import logging
 from sphinx.util.parsing import nested_parse_to_nodes
 
 from sphinx_fortran_domain.utils import (
@@ -21,6 +22,8 @@ from sphinx_fortran_domain.utils import (
 	read_text_utf8,
 )
 
+
+logger = logging.getLogger(__name__)
 
 _RE_DOC_SECTION = re.compile(r"^\s*##\s+(?P<title>\S.*?\S)\s*$")
 _RE_FOOTNOTE_DEF = re.compile(r"^\s*\.\.\s*\[(?P<label>\d+|#)\]\s+")
@@ -485,6 +488,24 @@ def _find_proc_by_name(procedures, name: str):
 	return None
 
 
+def _proc_ref_node(target: str, all_procedures, *, text: str | None = None) -> nodes.Node:
+	"""Return a cross-reference to ``target`` if it is a known procedure, else a plain literal."""
+	label = nodes.literal(text=str(text or target))
+	proc = _find_proc_by_name(all_procedures, target)
+	kind = getattr(proc, "kind", None) if proc is not None else None
+	if kind not in {"function", "subroutine"}:
+		return label
+	xref = addnodes.pending_xref(
+		"",
+		refdomain="f",
+		reftype=str(kind),
+		reftarget=str(target),
+		refexplicit=True,
+	)
+	xref += label
+	return xref
+
+
 def _append_type_bound_procedures(section: nodes.Element, bindings, all_procedures, state) -> None:
 	if not bindings:
 		return
@@ -499,20 +520,9 @@ def _append_type_bound_procedures(section: nodes.Element, bindings, all_procedur
 		if not bname:
 			continue
 
-		proc = _find_proc_by_name(all_procedures, target) if len(targets) == 1 else None
-		kind = getattr(proc, "kind", None) if proc is not None else None
-
 		para = nodes.paragraph()
-		if proc is not None and kind in {"function", "subroutine"}:
-			xref = addnodes.pending_xref(
-				"",
-				refdomain="f",
-				reftype=str(kind),
-				reftarget=str(target),
-				refexplicit=True,
-			)
-			xref += nodes.literal(text=str(bname))
-			para += xref
+		if len(targets) == 1:
+			para += _proc_ref_node(str(target), all_procedures, text=str(bname))
 		else:
 			para += nodes.literal(text=str(bname))
 
@@ -521,23 +531,22 @@ def _append_type_bound_procedures(section: nodes.Element, bindings, all_procedur
 			for index, target_name in enumerate(targets):
 				if index:
 					para += nodes.Text(", ")
-				target_proc = _find_proc_by_name(all_procedures, target_name)
-				target_kind = getattr(target_proc, "kind", None) if target_proc is not None else None
-				if target_proc is not None and target_kind in {"function", "subroutine"}:
-					xref = addnodes.pending_xref(
-						"",
-						refdomain="f",
-						reftype=str(target_kind),
-						reftarget=str(target_name),
-						refexplicit=True,
-					)
-					xref += nodes.literal(text=str(target_name))
-					para += xref
-				else:
-					para += nodes.literal(text=str(target_name))
+				para += _proc_ref_node(str(target_name), all_procedures)
 
 		item = nodes.list_item("", para)
 		items += item
+
+	section += _field_list("Procedures", items)
+
+
+def _append_interface_procedures(section: nodes.Element, names, all_procedures) -> None:
+	"""Render the specific procedures lumped together by a generic interface."""
+	if not names:
+		return
+
+	items = nodes.bullet_list()
+	for name in names:
+		items += nodes.list_item("", nodes.paragraph("", "", _proc_ref_node(str(name), all_procedures)))
 
 	section += _field_list("Procedures", items)
 
@@ -556,8 +565,14 @@ def _append_object_description(
 	components=None,
 	bindings=None,
 	all_procedures=None,
+	specifics=None,
+	bodies=None,
+	anchor: str | None = None,
 ) -> None:
 	"""Render an object in a Sphinx-like <dl class="..."> wrapper.
+
+	For interfaces, ``specifics`` lists the lumped procedure names and ``bodies``
+	is a sequence of ``(procedure, anchor)`` pairs rendered as nested objects.
 	"""
 	desc = addnodes.desc()
 	desc["domain"] = domain
@@ -565,6 +580,8 @@ def _append_object_description(
 	desc["classes"].extend([domain, objtype])
 
 	signode = addnodes.desc_signature()
+	if anchor:
+		signode["ids"].append(anchor)
 	# Keep signature rendering simple and stable: show the parsed signature text
 	# as a literal inside the signature node.
 	text = signature if signature else f"{name} ({objtype})"
@@ -576,10 +593,24 @@ def _append_object_description(
 	# Keep the opening free-text docstring at the top.
 	_append_doc(content, preamble_doc, state)
 	_append_named_decl_docs(content, "Arguments", args, state)
-	if objtype == "function":
+	if objtype in {"function", "interface"}:
 		_append_return_docs(content, result, state)
 	_append_component_docs(content, components, state)
 	_append_type_bound_procedures(content, bindings, all_procedures, state)
+	_append_interface_procedures(content, specifics, all_procedures)
+	for body, body_anchor in bodies or ():
+		_append_object_description(
+			content,
+			domain=domain,
+			objtype=str(getattr(body, "kind", "procedure")),
+			name=str(body.name),
+			signature=getattr(body, "signature", None),
+			doc=getattr(body, "doc", None),
+			state=state,
+			args=getattr(body, "arguments", None),
+			result=getattr(body, "result", None),
+			anchor=body_anchor,
+		)
 	# Place all "## ..." section blocks (including "## Examples") after intrinsic blocks.
 	_append_doc(content, section_blocks_doc, state)
 	desc += content
@@ -641,16 +672,82 @@ def _collect_exported_procedure_names_from_types(types, procedures, *, show_priv
 	return exported
 
 
-def _filter_exported_procedures(procedures, *, types, show_private: bool):
+def _collect_exported_procedure_names_from_interfaces(interfaces) -> set[str]:
+	# Specific procedures are reachable through a public generic interface even
+	# when they are private themselves.
+	return {
+		str(name)
+		for iface in _filter_visibility(interfaces, show_private=False)
+		for name in getattr(iface, "procedures", ()) or ()
+		if name
+	}
+
+
+def _filter_exported_procedures(procedures, *, types, interfaces=None, show_private: bool):
 	all_procedures = list(procedures or [])
 	if show_private:
 		return all_procedures
 	exported_names = _collect_exported_procedure_names_from_types(types, all_procedures, show_private=show_private)
+	exported_names |= _collect_exported_procedure_names_from_interfaces(interfaces)
 	return [
 		procedure
 		for procedure in all_procedures
 		if not _is_private_member(procedure) or str(getattr(procedure, "name", "")) in exported_names
 	]
+
+
+def _append_interface_section(section: nodes.Element, iface, *, scope_name: str, domain, index, procedures, state) -> None:
+	"""Render a module/submodule interface along with the procedures it lumps together."""
+	fullname = f"{scope_name}.{iface.name}"
+	obj_anchor = _make_object_id("interface", fullname)
+	domain.note_object(name=iface.name, objtype="interface", anchor=obj_anchor)
+	index["entries"].append(("single", f"{iface.name} (interface)", obj_anchor, "", None))
+
+	sub = nodes.section(ids=[obj_anchor])
+	sub += nodes.title(text=f"{iface.name} (interface)")
+
+	bodies = list(getattr(iface, "bodies", None) or ())
+	specifics = list(getattr(iface, "procedures", None) or ())
+
+	if len(bodies) == 1 and bodies[0].name == iface.name:
+		# A single explicit interface (e.g. from an abstract interface block):
+		# document the body directly as the interface.
+		body = bodies[0]
+		_append_object_description(
+			sub,
+			domain="f",
+			objtype="interface",
+			name=str(iface.name),
+			signature=getattr(body, "signature", None),
+			doc=getattr(iface, "doc", None) or getattr(body, "doc", None),
+			state=state,
+			args=getattr(body, "arguments", None),
+			result=getattr(body, "result", None),
+		)
+		section += sub
+		return
+
+	body_entries = []
+	for body in bodies:
+		kind = str(getattr(body, "kind", "procedure"))
+		body_anchor = _make_object_id(kind, f"{fullname}.{body.name}")
+		domain.note_object(name=body.name, objtype=kind, anchor=body_anchor)
+		index["entries"].append(("single", f"{body.name} ({kind})", body_anchor, "", None))
+		body_entries.append((body, body_anchor))
+
+	_append_object_description(
+		sub,
+		domain="f",
+		objtype="interface",
+		name=str(iface.name),
+		signature=None,
+		doc=getattr(iface, "doc", None),
+		state=state,
+		all_procedures=[*(procedures or ()), *bodies],
+		specifics=specifics,
+		bodies=body_entries,
+	)
+	section += sub
 
 class FortranObject(ObjectDescription[str]):
 	"""Base class for manual Fortran object directives.
@@ -780,8 +877,79 @@ class FortranInterface(FortranObject):
 	   ```{f:interface} solve
 	   Generic interface for linear solvers.
 	   ```
+
+	The specific procedures lumped together by the interface are listed under a
+	"Procedures" field and linked to their documentation (parsed or declared with
+	``f:function``/``f:subroutine``). By default they are taken from the interface
+	of the same name in ``fortran_sources`` (the first module, then submodule,
+	defining it).
+
+	Options:
+
+	* ``:module:`` module or submodule in which to look up the parsed interface,
+	  when several of them define an interface with that name.
+	* ``:procedures:`` comma-separated specific procedures, overriding the parsed
+	  list (e.g. to list only some of them, or to document an interface that is
+	  not parsed). Names unknown to the parsed interface are reported as warnings.
+
+	.. code-block:: rst
+
+	   .. f:interface:: solve
+	      :module: linear_solvers
+	      :procedures: solve_real, solve_complex
+
+	      Generic interface for linear solvers.
 	"""
 	objtype = "interface"
+	option_spec = {
+		**FortranObject.option_spec,
+		"module": rst_directives.unchanged_required,
+		"procedures": rst_directives.unchanged,
+	}
+
+	def transform_content(self, content_node: addnodes.desc_content) -> None:
+		name = self.names[0] if self.names else self.arguments[0].strip()
+		module = (self.options.get("module") or "").strip() or None
+		parsed = self.env.get_domain("f").find_interface(name, module=module)  # type: ignore[attr-defined]
+		if parsed is None and module:
+			logger.warning(
+				"f:interface %s: no parsed interface of that name in module %s",
+				name,
+				module,
+				location=self.get_location(),
+			)
+		parsed_names = [str(n) for n in getattr(parsed, "procedures", None) or ()]
+
+		if "procedures" in self.options:
+			names = [n.strip() for n in re.split(r"[,\s]+", self.options["procedures"] or "") if n.strip()]
+			if parsed is not None:
+				known = {n.lower() for n in parsed_names}
+				unknown = [n for n in names if n.lower() not in known]
+				if unknown:
+					logger.warning(
+						"f:interface %s: %s not among the procedures of the parsed interface (%s)",
+						name,
+						", ".join(unknown),
+						", ".join(parsed_names) or "none",
+						location=self.get_location(),
+					)
+		else:
+			names = parsed_names
+		if not names:
+			return
+		items = nodes.bullet_list()
+		for name in names:
+			xref = addnodes.pending_xref(
+				"",
+				refdomain="f",
+				reftype="procedure",
+				reftarget=name,
+				refexplicit=True,
+			)
+			xref += nodes.literal(text=name)
+			items += nodes.list_item("", nodes.paragraph("", "", xref))
+		# Keep the list right after the free-text description, as in parsed interfaces.
+		content_node += _field_list("Procedures", items)
 
 
 class FortranProgram(Directive):
@@ -912,7 +1080,7 @@ class FortranModule(Directive):
 	"""Render a parsed Fortran module and its public members.
 
 	This directive resolves a module from parsed sources and renders module docs,
-	variables, derived types, procedures, and interfaces in one section.
+	variables, derived types, interfaces, and procedures in one section.
 
 	Options:
 
@@ -982,6 +1150,7 @@ class FortranModule(Directive):
 		procedures = _filter_exported_procedures(
 			getattr(module, "procedures", None),
 			types=getattr(module, "types", None),
+			interfaces=getattr(module, "interfaces", None),
 			show_private=show_private,
 		)
 		interfaces = _filter_visibility(getattr(module, "interfaces", None), show_private=show_private)
@@ -1010,6 +1179,19 @@ class FortranModule(Directive):
 				)
 				section += sub
 
+		if interfaces:
+			section += nodes.subtitle(text="Interfaces")
+			for g in interfaces:
+				_append_interface_section(
+					section,
+					g,
+					scope_name=modname,
+					domain=domain,
+					index=index,
+					procedures=procedures,
+					state=self.state,
+				)
+
 		if procedures:
 			section += nodes.subtitle(text="Procedures")
 			for p in procedures:
@@ -1032,19 +1214,6 @@ class FortranModule(Directive):
 					args=getattr(p, "arguments", None),
 					result=getattr(p, "result", None),
 				)
-				section += sub
-
-		if interfaces:
-			section += nodes.subtitle(text="Interfaces")
-			for g in interfaces:
-				fullname = f"{modname}.{g.name}"
-				obj_anchor = _make_object_id("interface", fullname)
-				getattr(domain, "note_object")(name=g.name, objtype="interface", anchor=obj_anchor)
-				index["entries"].append(("single", f"{g.name} (interface)", obj_anchor, "", None))
-
-				sub = nodes.section(ids=[obj_anchor])
-				sub += nodes.title(text=f"{g.name} (interface)")
-				_append_doc(sub, getattr(g, "doc", None), self.state)
 				section += sub
 
 		return [index, section]
@@ -1123,6 +1292,7 @@ class FortranSubmodule(Directive):
 		procedures = _filter_exported_procedures(
 			getattr(submodule, "procedures", None),
 			types=getattr(submodule, "types", None),
+			interfaces=getattr(submodule, "interfaces", None),
 			show_private=show_private,
 		)
 		interfaces = _filter_visibility(getattr(submodule, "interfaces", None), show_private=show_private)
@@ -1151,6 +1321,19 @@ class FortranSubmodule(Directive):
 				)
 				section += sub
 
+		if interfaces:
+			section += nodes.subtitle(text="Interfaces")
+			for g in interfaces:
+				_append_interface_section(
+					section,
+					g,
+					scope_name=submodname,
+					domain=domain,
+					index=index,
+					procedures=procedures,
+					state=self.state,
+				)
+
 		if procedures:
 			section += nodes.subtitle(text="Procedures")
 			for p in procedures:
@@ -1173,19 +1356,6 @@ class FortranSubmodule(Directive):
 					args=getattr(p, "arguments", None),
 					result=getattr(p, "result", None),
 				)
-				section += sub
-
-		if interfaces:
-			section += nodes.subtitle(text="Interfaces")
-			for g in interfaces:
-				fullname = f"{submodname}.{g.name}"
-				obj_anchor = _make_object_id("interface", fullname)
-				getattr(domain, "note_object")(name=g.name, objtype="interface", anchor=obj_anchor)
-				index["entries"].append(("single", f"{g.name} (interface)", obj_anchor, "", None))
-
-				sub = nodes.section(ids=[obj_anchor])
-				sub += nodes.title(text=f"{g.name} (interface)")
-				_append_doc(sub, getattr(g, "doc", None), self.state)
 				section += sub
 
 		return [index, section]

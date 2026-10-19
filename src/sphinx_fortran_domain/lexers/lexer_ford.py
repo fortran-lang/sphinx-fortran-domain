@@ -611,14 +611,7 @@ class FORDFortranLexer(FortranLexer):
                 )
             )
         for i in getattr(item, "interfaces", []) or []:
-            interfaces.append(
-                FortranInterface(
-                    name=str(getattr(i, "name", "")),
-                    doc=_get_doc(i),
-                    is_private=_is_item_private(i),
-                    location=_get_location(i),
-                )
-            )
+            interfaces.append(self._convert_interface(i))
 
         # Filter empty names
         variables = [v for v in variables if v.name]
@@ -711,14 +704,7 @@ class FORDFortranLexer(FortranLexer):
                 )
             )
         for i in getattr(item, "interfaces", []) or []:
-            interfaces.append(
-                FortranInterface(
-                    name=str(getattr(i, "name", "")),
-                    doc=_get_doc(i),
-                    is_private=_is_item_private(i),
-                    location=_get_location(i),
-                )
-            )
+            interfaces.append(self._convert_interface(i))
 
         variables = [v for v in variables if v.name]
         procedures = [p for p in procedures if p.name]
@@ -734,6 +720,32 @@ class FORDFortranLexer(FortranLexer):
             types=types,
             interfaces=interfaces,
             location=current.location,
+        )
+
+    def _convert_interface(self, iface: object) -> FortranInterface:
+        bodies: List[FortranProcedure] = []
+        if getattr(iface, "generic", False):
+            for f in getattr(iface, "functions", []) or []:
+                bodies.append(self._convert_procedure(f, kind="function"))
+            for s in getattr(iface, "subroutines", []) or []:
+                bodies.append(self._convert_procedure(s, kind="subroutine"))
+        else:
+            # Non-generic interface: FORD wraps a single body under `procedure`.
+            proc = getattr(iface, "procedure", None)
+            if isinstance(proc, (FordFunction, FordSubroutine)):
+                kind = "function" if isinstance(proc, FordFunction) else "subroutine"
+                bodies.append(self._convert_procedure(proc, kind=kind))
+
+        names: List[str] = [str(getattr(mp, "name", "")).strip() for mp in getattr(iface, "modprocs", []) or []]
+        names.extend(b.name for b in bodies)
+
+        return FortranInterface(
+            name=str(getattr(iface, "name", "")),
+            doc=_get_doc(iface),
+            is_private=_is_item_private(iface),
+            location=_get_location(iface),
+            procedures=tuple(dict.fromkeys(n for n in names if n)),
+            bodies=tuple(b for b in bodies if b.name),
         )
 
     def _convert_procedure(self, proc: object, *, kind: str) -> FortranProcedure:
