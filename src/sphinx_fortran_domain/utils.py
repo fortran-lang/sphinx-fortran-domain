@@ -101,8 +101,12 @@ def find_inline_doc(line: str, doc_markers: Sequence[str]) -> Optional[tuple[int
 		pos = line.find(m)
 		if pos == -1:
 			continue
-		if line[:pos].strip() == "":
+		prefix = line[:pos].strip()
+		if prefix == "":
 			# Leading marker is handled by is_doc_line.
+			continue
+		if prefix.startswith("!"):
+			# The marker sits inside an ordinary comment (`! see !! below`).
 			continue
 		if best is None or pos < best[0]:
 			best = (pos, m)
