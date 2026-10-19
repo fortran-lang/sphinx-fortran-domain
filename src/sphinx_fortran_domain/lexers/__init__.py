@@ -72,6 +72,13 @@ class FortranInterface:
 	doc: str | None = None
 	is_private: bool = False
 	location: SourceLocation | None = None
+	# Names of the specific procedures lumped together by this interface, in
+	# declaration order (`module procedure` lists and interface bodies alike).
+	procedures: Sequence[str] = field(default_factory=tuple)
+	# Interface bodies declared inside the block (e.g. `module function ...`),
+	# which carry their own signature/arguments since they may not be defined
+	# in the same module.
+	bodies: Sequence[FortranProcedure] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)

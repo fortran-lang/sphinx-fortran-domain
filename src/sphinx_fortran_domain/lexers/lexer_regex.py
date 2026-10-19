@@ -56,6 +56,17 @@ _RE_TYPE_GENERIC_BIND = re.compile(
 	r"^\s*generic\b(?P<attrs>[^!]*)::\s*(?P<name>[A-Za-z_]\w*)\b\s*=>\s*(?P<targets>.+?)\s*$",
 	re.IGNORECASE,
 )
+_RE_INTERFACE = re.compile(
+	r"^\s*(?:abstract\s+)?interface\b\s*(?P<name>(?:operator|assignment)\s*\([^)]*\)|[A-Za-z_]\w*)?\s*$",
+	re.IGNORECASE,
+)
+_RE_END_INTERFACE = re.compile(r"^\s*end\s*interface\b", re.IGNORECASE)
+# Specific procedures listed inside a generic interface block:
+# `module procedure a, b` or `procedure [::] a, b`.
+_RE_IFACE_PROC_LIST = re.compile(
+	r"^\s*(?:module\s+)?procedure\b\s*(?:::)?\s*(?P<names>[A-Za-z_].*?)\s*$",
+	re.IGNORECASE,
+)
 _RE_END_PROC = re.compile(r"^\s*end\s*(subroutine|function)\b", re.IGNORECASE)
 _RE_RESULT = re.compile(r"\bresult\s*\(\s*([A-Za-z_]\w*)\s*\)", re.IGNORECASE)
 _RE_ACCESS_STMT = re.compile(
@@ -193,15 +204,19 @@ def _normalize_proc_signature(raw: str) -> str:
 	return s
 
 
-def _match_interface(line: str) -> Optional[str]:
-	code = _strip_inline_comment(line)
-	low = code.lower().strip()
-	if low.startswith("end interface"):
-		return None
-	m = re.match(r"^\s*(?:abstract\s+)?interface\s+([A-Za-z_]\w*)\b", code, flags=re.IGNORECASE)
+def _normalize_generic_name(name: str) -> str:
+	# `operator (+)` -> `operator(+)`; plain names are left untouched.
+	if "(" in name:
+		return re.sub(r"\s+", "", name).lower()
+	return name
+
+
+def _match_interface_start(line: str) -> Optional[str]:
+	"""Return the generic name of an interface block opening, "" if unnamed, None otherwise."""
+	m = _RE_INTERFACE.match(_strip_inline_comment(line))
 	if not m:
 		return None
-	return m.group(1)
+	return _normalize_generic_name(m.group("name") or "")
 
 
 def _parse_access_statement(line: str) -> Optional[tuple[str, list[str]]]:
@@ -215,9 +230,9 @@ def _parse_access_statement(line: str) -> Optional[tuple[str, list[str]]]:
 	if names_text:
 		for token in _split_top_level_commas(names_text):
 			t = token.strip()
-			mm = re.match(r"^([A-Za-z_]\w*)\b", t)
+			mm = re.match(r"^((?:operator|assignment)\s*\([^)]*\)|[A-Za-z_]\w*)", t, flags=re.IGNORECASE)
 			if mm:
-				names.append(mm.group(1).lower())
+				names.append(_normalize_generic_name(mm.group(1)).lower())
 	return mode, names
 
 
@@ -315,6 +330,77 @@ class RegexFortranLexer(FortranLexer):
 		proc_stack: List[dict] = []
 		current_proc: Optional[dict] = None
 		current_type: Optional[dict] = None
+		current_interface: Optional[dict] = None
+
+		def finish_interface() -> None:
+			iface = current_interface
+			if iface is None:
+				return
+
+			def is_private(name: str) -> bool:
+				return _resolve_is_private(
+					name=name,
+					explicit_private=None,
+					default_private=scope_default_private,
+					public_names=scope_public_names,
+					private_names=scope_private_names,
+				)
+
+			bodies: List[FortranProcedure] = iface["bodies"]
+			if iface["name"]:
+				entries = [
+					FortranInterface(
+						name=iface["name"],
+						doc=iface["doc"],
+						is_private=is_private(iface["name"]),
+						location=iface["location"],
+						procedures=tuple(dict.fromkeys(iface["procedures"])),
+						bodies=tuple(bodies),
+					)
+				]
+			else:
+				# An unnamed (or abstract) interface block declares one explicit
+				# interface per body. A doc block above `interface` documents a
+				# lone body that has no doc of its own.
+				entries = [
+					FortranInterface(
+						name=b.name,
+						doc=b.doc or (iface["doc"] if len(bodies) == 1 else None),
+						is_private=is_private(b.name),
+						location=b.location,
+						procedures=(b.name,),
+						bodies=(b,),
+					)
+					for b in bodies
+				]
+			if not entries:
+				return
+
+			if iface["container_kind"] == "module":
+				container = modules.get(iface["container_name"])
+				if container:
+					modules[iface["container_name"]] = FortranModuleInfo(
+						name=container.name,
+						doc=container.doc,
+						variables=getattr(container, "variables", ()),
+						procedures=container.procedures,
+						types=container.types,
+						interfaces=[*container.interfaces, *entries],
+						location=container.location,
+					)
+			else:
+				container = submodules.get(iface["container_name"])
+				if container:
+					submodules[iface["container_name"]] = FortranSubmoduleInfo(
+						name=container.name,
+						parent=container.parent,
+						doc=container.doc,
+						variables=getattr(container, "variables", ()),
+						procedures=container.procedures,
+						types=container.types,
+						interfaces=[*container.interfaces, *entries],
+						location=container.location,
+					)
 
 		def flush_doc() -> Optional[str]:
 			nonlocal pending_doc
@@ -713,7 +799,11 @@ class RegexFortranLexer(FortranLexer):
 				)
 
 				if finished.get("nesting_depth", 1) == 1:
-					if finished["container_kind"] == "module":
+					if finished["container_kind"] == "interface":
+						if current_interface is not None:
+							current_interface["bodies"].append(entry)
+							current_interface["procedures"].append(entry.name)
+					elif finished["container_kind"] == "module":
 						container = modules.get(finished["container_name"])  # type: ignore[arg-type]
 						if container:
 							modules[finished["container_name"]] = FortranModuleInfo(
@@ -834,6 +924,7 @@ class RegexFortranLexer(FortranLexer):
 				continue
 
 			if scope_kind == "module" and _RE_END_MODULE.match(line):
+				current_interface = None
 				scope_kind = None
 				scope_name = None
 				scope_parent = None
@@ -849,6 +940,7 @@ class RegexFortranLexer(FortranLexer):
 				continue
 
 			if scope_kind == "submodule" and _RE_END_SUBMODULE.match(line):
+				current_interface = None
 				scope_kind = None
 				scope_name = None
 				scope_parent = None
@@ -932,6 +1024,24 @@ class RegexFortranLexer(FortranLexer):
 				in_scope_contains = True
 				pending_doc = []
 				continue
+
+			# Inside an interface block (between bodies): collect specific procedure
+			# names; procedure signatures fall through to open an interface body.
+			if current_interface is not None and current_proc is None:
+				if _RE_END_INTERFACE.match(line):
+					finish_interface()
+					current_interface = None
+					pending_doc = []
+					continue
+				m = _RE_IFACE_PROC_LIST.match(_strip_inline_comment(line))
+				if m:
+					current_interface["procedures"].extend(_binding_targets_from_text(m.group("names")))
+					pending_doc = []
+					continue
+				if _match_proc(line) is None:
+					# e.g. `import` statements
+					pending_doc = []
+					continue
 
 			# Collect symbols into the current scope
 			# Variables (module/submodule spec-part, before CONTAINS)
@@ -1072,7 +1182,7 @@ class RegexFortranLexer(FortranLexer):
 					"name": name,
 					"doc": pre_sig_doc,
 					"location": SourceLocation(path=path, lineno=idx),
-					"container_kind": scope_kind,
+					"container_kind": "interface" if current_interface is not None and not proc_stack else scope_kind,
 					"container_name": scope_name,
 					"nesting_depth": len(proc_stack) + 1,
 					"result_name": None,
@@ -1200,46 +1310,17 @@ class RegexFortranLexer(FortranLexer):
 				}
 				continue
 
-			iface = _match_interface(line)
-			if iface and scope_kind in {"module", "submodule"} and scope_name:
-				doc = flush_doc()
-				entry = FortranInterface(
-					name=iface,
-					doc=doc,
-					is_private=_resolve_is_private(
-						name=iface,
-						explicit_private=None,
-						default_private=scope_default_private,
-						public_names=scope_public_names,
-						private_names=scope_private_names,
-					),
-					location=SourceLocation(path=path, lineno=idx),
-				)
-				if scope_kind == "module":
-					current = modules.get(scope_name)
-					if current:
-						modules[scope_name] = FortranModuleInfo(
-							name=current.name,
-							doc=current.doc,
-							variables=getattr(current, "variables", ()),
-							procedures=current.procedures,
-							types=current.types,
-							interfaces=[*current.interfaces, entry],
-							location=current.location,
-						)
-				else:
-					current = submodules.get(scope_name)
-					if current:
-						submodules[scope_name] = FortranSubmoduleInfo(
-							name=current.name,
-							parent=current.parent,
-							doc=current.doc,
-							variables=getattr(current, "variables", ()),
-							procedures=current.procedures,
-							types=current.types,
-							interfaces=[*current.interfaces, entry],
-							location=current.location,
-						)
+			iface = _match_interface_start(line) if current_proc is None else None
+			if iface is not None and scope_kind in {"module", "submodule"} and scope_name:
+				current_interface = {
+					"name": iface,
+					"doc": flush_doc(),
+					"location": SourceLocation(path=path, lineno=idx),
+					"container_kind": scope_kind,
+					"container_name": scope_name,
+					"procedures": [],
+					"bodies": [],
+				}
 				continue
 
 			# Any non-doc, non-blank line breaks the "pending doc" chain.

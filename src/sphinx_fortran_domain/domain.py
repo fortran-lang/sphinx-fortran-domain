@@ -19,7 +19,13 @@ from sphinx_fortran_domain.directives import (
 
 from typing import Dict, Iterable, Iterator, Optional, Tuple
 
-from sphinx_fortran_domain.lexers import FortranModuleInfo, FortranParseResult, FortranSubmoduleInfo, FortranProgramInfo
+from sphinx_fortran_domain.lexers import (
+    FortranInterface as FortranInterfaceInfo,
+    FortranModuleInfo,
+    FortranParseResult,
+    FortranProgramInfo,
+    FortranSubmoduleInfo,
+)
 
 @dataclass(frozen=True)
 class FortranObjectEntry:
@@ -97,6 +103,23 @@ class FortranDomain(Domain):
         symbols = self.data.get("symbols", {})
         return symbols.get("programs", {}).get(name)
 
+    def find_interface(self, name: str, module: Optional[str] = None) -> Optional[FortranInterfaceInfo]:
+        """Find a parsed interface by name (case-insensitive) across modules, then submodules.
+
+        ``module`` restricts the search to the module or submodule of that name.
+        """
+        symbols = self.data.get("symbols", {})
+        key = name.strip().lower()
+        scope = (module or "").strip().lower()
+        for kind in ("modules", "submodules"):
+            for scope_name, container in symbols.get(kind, {}).items():
+                if scope and scope_name.lower() != scope:
+                    continue
+                for iface in getattr(container, "interfaces", None) or ():
+                    if str(iface.name).lower() == key:
+                        return iface
+        return None
+
     _role_to_objtype = {
         "program": "program",
         "prog": "program",
@@ -147,11 +170,20 @@ class FortranDomain(Domain):
     ) -> Optional[nodes.Element]:
         """Resolve cross-reference for a Fortran object."""
         objects_by_type: Dict[str, Dict[str, FortranObjectEntry]] = self.data.get("objects", {})
-        objtype = self._role_to_objtype.get(typ)
-        if not objtype:
-            return None
+        if typ == "procedure":
+            # Internal reftype for references whose kind is unknown when the
+            # node is built (e.g. `f:interface` `:procedures:` entries).
+            objtypes = ("function", "subroutine", "interface")
+        else:
+            objtype = self._role_to_objtype.get(typ)
+            if not objtype:
+                return None
+            objtypes = (objtype,)
 
-        entry = objects_by_type.get(objtype, {}).get(target)
+        entry = next(
+            (objects_by_type[t][target] for t in objtypes if target in objects_by_type.get(t, {})),
+            None,
+        )
         if entry is None:
             return None
 
