@@ -259,6 +259,10 @@ def _proc_signature_from_ford(proc: object) -> Optional[str]:
     return sig
 
 
+# FORD's docmark ('!' + settings.docmark), documenting the preceding statement.
+_FORD_DOCMARK = "!!"
+
+
 def _prepare_text_for_ford(text: str, configured_markers: Sequence[str], *, ford_marker: str) -> str:
     """Prepare source for FORD.
 
@@ -267,15 +271,22 @@ def _prepare_text_for_ford(text: str, configured_markers: Sequence[str], *, ford
     - FORD also errors if doc markers appear inline (after code).
 
     Strategy:
-    - Rewrite any *leading* configured doc marker to a single FORD-compatible marker.
-    - For *inline* occurrences (code ... !> doc), split into:
-        1) a doc-only line (so FORD can attach it)
-        2) the original code line without the inline doc part
+    - ``!!`` is FORD's native docmark: it documents the *preceding* statement, so
+      it is kept as is (rewriting it to the predoc marker would attach every
+      such doc to the *next* entity).
+    - Rewrite any other *leading* configured doc marker to FORD's predoc marker.
+    - For *inline* occurrences (code ... !> doc), split into a doc-only line and
+      the code line: the doc line goes before the code for predoc markers and
+      after it for ``!!``.
+    - Markers inside an ordinary comment (``! see !! below``) are not docs.
     """
 
     markers = [m for m in (configured_markers or []) if m and len(m) == 2 and m[0] == "!"]
     if not markers:
         markers = [ford_marker]
+
+    def _target(marker: str) -> str:
+        return _FORD_DOCMARK if marker == _FORD_DOCMARK else ford_marker
 
     out: List[str] = []
     for line in text.splitlines():
@@ -298,7 +309,7 @@ def _prepare_text_for_ford(text: str, configured_markers: Sequence[str], *, ford
         for m in markers:
             if stripped.startswith(m):
                 payload = _drop_single_leading_ws(stripped[len(m) :])
-                out.append(indent + ford_marker + payload)
+                out.append(indent + _target(m) + payload)
                 replaced_leading = True
                 break
         if replaced_leading:
@@ -308,7 +319,10 @@ def _prepare_text_for_ford(text: str, configured_markers: Sequence[str], *, ford
         split_at: Optional[tuple[int, str]] = None
         for m in markers:
             pos = line.find(m)
-            if pos != -1 and line[:pos].strip() != "":
+            prefix = line[:pos].strip() if pos != -1 else ""
+            # An empty prefix is a leading marker (handled above); a prefix that
+            # starts with '!' means the marker sits inside an ordinary comment.
+            if prefix and not prefix.startswith("!"):
                 # Choose the earliest match.
                 if split_at is None or pos < split_at[0]:
                     split_at = (pos, m)
@@ -317,10 +331,13 @@ def _prepare_text_for_ford(text: str, configured_markers: Sequence[str], *, ford
             pos, m = split_at
             code_part = line[:pos].rstrip()
             doc_part = line[pos + len(m) :].lstrip()
-            if doc_part:
-                out.append(indent + ford_marker + " " + doc_part)
+            doc_line = indent + _target(m) + " " + doc_part if doc_part else None
+            if doc_line and m != _FORD_DOCMARK:
+                out.append(doc_line)
             if code_part:
                 out.append(code_part)
+            if doc_line and m == _FORD_DOCMARK:
+                out.append(doc_line)
             continue
 
         out.append(line)

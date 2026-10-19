@@ -6,6 +6,15 @@ This project aims to follow Keep a Changelog principles and Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-19
+
+### Fixed
+- FORD lexer: `!!` doc comments now document the *preceding* statement, as in FORD. They were rewritten to the predoc marker, so every `!!` doc was attached to the next entity (an argument's doc showed up on the following argument, and an interface's doc on its first procedure).
+- Doc markers inside ordinary comments (e.g. `! !!! Check arguments !!!!`) are no longer taken for inline documentation (FORD and regex lexers).
+
+### Known issues
+- The regex lexer still treats `!!` as documenting the *next* statement.
+
 ## [0.2.0] - 2026-10-19
 
 ### Added
