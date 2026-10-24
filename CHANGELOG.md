@@ -6,6 +6,9 @@ This project aims to follow Keep a Changelog principles and Semantic Versioning.
 
 ## [Unreleased]
 
+### Fixed
+- Regex lexer: doc comments keep their indentation. Only the space after the doc marker is removed, then each doc block loses the indentation its lines share, so list item continuations and directive bodies (`.. math::`, `.. code-block::`) render correctly. All leading whitespace used to be stripped from every line, which broke them.
+
 ## [0.2.1] - 2026-10-19
 
 ### Fixed
