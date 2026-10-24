@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence
 
 from sphinx_fortran_domain.utils import (
+	dedent_doc as _dedent_doc,
 	find_inline_doc as _find_inline_doc,
 	is_doc_line as _is_doc_line,
 	read_lines_utf8,
@@ -312,6 +313,10 @@ class RegexFortranLexer(FortranLexer):
 		doc_markers: Sequence[str],
 	) -> None:
 		pending_doc: List[str] = []
+		# Doc lines found right after a module/submodule/program statement, per
+		# scope: the doc before the statement, then the raw lines after it, kept
+		# so that the whole block is dedented at once.
+		header_docs: Dict[tuple, tuple] = {}
 		scope_kind: Optional[str] = None  # "module" | "submodule" | "program"
 		scope_name: Optional[str] = None
 		scope_parent: Optional[str] = None
@@ -406,12 +411,21 @@ class RegexFortranLexer(FortranLexer):
 			nonlocal pending_doc
 			if not pending_doc:
 				return None
-			doc = "\n".join(pending_doc).rstrip()
+			doc = _dedent_doc(pending_doc)
 			pending_doc = []
 			return doc
 
 		def add_to_pending(text: str) -> None:
 			pending_doc.append(text)
+
+		def header_doc(previous: Optional[str], text: str) -> Optional[str]:
+			"""Doc of the current scope once `text` is appended after its statement."""
+			base, lines = header_docs.setdefault((scope_kind, scope_name), (previous, []))
+			lines.append(text)
+			after = _dedent_doc(lines)
+			if base and after:
+				return f"{base}\n{after}"
+			return base or after
 
 		def add_module_doc_line(text: str) -> None:
 			nonlocal modules
@@ -420,7 +434,7 @@ class RegexFortranLexer(FortranLexer):
 			current = modules.get(scope_name)
 			if current is None:
 				return
-			updated = (current.doc + "\n" + text).strip() if current.doc else text.strip()
+			updated = header_doc(current.doc, text)
 			modules[scope_name] = FortranModuleInfo(
 				name=current.name,
 				doc=updated,
@@ -438,7 +452,7 @@ class RegexFortranLexer(FortranLexer):
 			current = submodules.get(scope_name)
 			if current is None:
 				return
-			updated = (current.doc + "\n" + text).strip() if current.doc else text.strip()
+			updated = header_doc(current.doc, text)
 			submodules[scope_name] = FortranSubmoduleInfo(
 				name=current.name,
 				parent=current.parent,
@@ -456,7 +470,7 @@ class RegexFortranLexer(FortranLexer):
 			current = programs.get(scope_name)
 			if current is None:
 				return
-			updated = (current.doc + "\n" + text).strip() if current.doc else text.strip()
+			updated = header_doc(current.doc, text)
 			programs[scope_name] = FortranProgramInfo(
 				name=current.name,
 				doc=updated,
@@ -760,9 +774,9 @@ class RegexFortranLexer(FortranLexer):
 
 				# Merge doc captured before signature with the doc captured after signature.
 				proc_doc = finished.get("doc")
-				post = "\n".join(finished.get("proc_doc_lines", [])).strip() or None
+				post = _dedent_doc(finished.get("proc_doc_lines", []))
 				if proc_doc and post:
-					proc_doc = f"{proc_doc}\n{post}".strip()
+					proc_doc = f"{proc_doc}\n{post}"
 				elif post:
 					proc_doc = post
 
