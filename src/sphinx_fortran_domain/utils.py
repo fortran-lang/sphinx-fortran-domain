@@ -3,6 +3,7 @@ from __future__ import annotations
 import glob
 import os
 import re
+import textwrap
 from pathlib import Path
 from typing import Iterable, Optional, Sequence
 
@@ -80,12 +81,26 @@ def strip_inline_comment(line: str) -> str:
 
 
 def is_doc_line(line: str, doc_markers: Sequence[str]) -> Optional[str]:
-	"""Return doc text if the line is a doc line, else None."""
+	"""Return doc text if the line is a doc line, else None.
+
+	Only the single space or tab separating the marker from the text is
+	removed: further indentation is meaningful in reST (list item
+	continuations, directive bodies) and is preserved. Use `dedent_doc` on the
+	lines of a doc block to remove the indentation they all share.
+	"""
 	stripped = line.lstrip()
 	for marker in doc_markers:
 		if stripped.startswith(marker):
-			return stripped[len(marker) :].lstrip(" \t")
+			text = stripped[len(marker) :].rstrip()
+			return text[1:] if text[:1] in (" ", "\t") else text
 	return None
+
+
+def dedent_doc(lines: Sequence[str]) -> Optional[str]:
+	"""Join the lines of a doc block, removing their common indentation and
+	the surrounding blank lines. Returns None for an empty block."""
+	text = textwrap.dedent("\n".join(lines)).strip("\n")
+	return text or None
 
 
 def find_inline_doc(line: str, doc_markers: Sequence[str]) -> Optional[tuple[int, str]]:
